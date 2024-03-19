@@ -37,7 +37,7 @@ class Coord_Conv(nn.Module):
         return final_conv
 
 class Encoder_Block(nn.Module):
-    def __init__(self, conv_in_channel, conv_out_channel, norm_layer=nn.BatchNorm2d,
+    def __init__(self, conv_in_channel, conv_out_channel, hidden_channel=None, norm_layer=nn.BatchNorm2d,
                  activation_layer=nn.LeakyReLU(), use_spect=False, use_coord=False):
         super(Encoder_Block, self).__init__()
 
@@ -46,15 +46,16 @@ class Encoder_Block(nn.Module):
         kwargs_fine = {'kernel_size': 3, 'stride': 1, 'padding': 1}
         ############################################
 
+        hidden_channel = hidden_channel or conv_out_channel
         # Initialize convolutional layers
-        self.conv1 = self._coord_conv(conv_in_channel, conv_out_channel, use_spect, use_coord, **kwargs_down)
-        self.conv2 = self._coord_conv(conv_out_channel, conv_out_channel, use_spect, use_coord, **kwargs_fine)
+        self.conv1 = self._coord_conv(conv_in_channel, hidden_channel, use_spect, use_coord, **kwargs_down)
+        self.conv2 = self._coord_conv(hidden_channel, conv_out_channel, use_spect, use_coord, **kwargs_fine)
 
         # Sequential model
         self.model = nn.Sequential(norm_layer(conv_in_channel),
                                    activation_layer,
                                    self.conv1,
-                                   norm_layer(conv_out_channel),
+                                   norm_layer(hidden_channel),
                                    activation_layer,
                                    self.conv2)
 
@@ -68,30 +69,6 @@ class Encoder_Block(nn.Module):
 
     def forward(self, x):
         return self.model(x)
-
-class Basic_Encoder(nn.Module):
-    """
-        A basic encoder module to extract feature representations. The module consists
-        of sequential encoder blocks that downsample the input feature map and increase
-        its depth.
-    """
-
-    def __init__(self, input_nc, generator_filter_num=64, use_spect=True):
-        super(Basic_Encoder, self).__init__()
-
-        self.encoder_block_1 = Encoder_Block(input_nc, generator_filter_num*2, use_spect=use_spect)
-        self.encoder_block_2 = Encoder_Block(generator_filter_num*2, generator_filter_num*4, use_spect=use_spect)
-
-    def forward(self, x):
-        """
-            Defines the forward pass of the encoder.
-
-            :param input: Input tensor to the encoder.
-            :return: Output tensor after passing through the encoder blocks.
-        """
-        x = self.encoder_block_1(x)
-        x = self.encoder_block_2(x)
-        return x
 
 class Gated_Conv(nn.Module):
     """
@@ -187,7 +164,7 @@ class Res_Block(nn.Module):
     a learnable shortcut, and various normalization and nonlinearity layers.
     """
     def __init__(self, input_nc, output_nc=None, hidden_nc=None, norm_layer=nn.BatchNorm2d,
-                 activation=nn.LeakyReLU(), learnable_shortcut=False, use_spect=False):
+                 activation=nn.LeakyReLU(), learnable_shortcut=False, use_spect=False, shortcut=nn.Identity): # maybe we dont need shortcut option and always use coordConv
         super(Res_Block, self).__init__()
 
         # Default values for hidden and output channels if not specified
@@ -213,12 +190,10 @@ class Res_Block(nn.Module):
         self.model = nn.Sequential(*layers)
 
         # Construct the shortcut path
-        if self.learnable_shortcut:
-            self.shortcut = nn.Sequential(
-                Coord_Conv(input_nc, output_nc, use_spect=use_spect, **conv_shortcut_params)
-            )
-        else:
-            self.shortcut = nn.Identity()
+        self.shortcut = shortcut
+        # can be nn.Sequential(
+             #   Coord_Conv(input_nc, output_nc, use_spect=use_spect, **conv_shortcut_params)
+            #)
 
     def forward(self, x):
         return self.model(x) + self.shortcut(x)
@@ -258,27 +233,117 @@ class Res_Block_Decoder(nn.Module):
     def forward(self, x):
         return self.model(x) + self.shortcut(x)
 
-class Hard_Encoder(nn.Module):
+
+
+class Encoder_1(nn.Module):
     """
         Hard Encoder with configurable normalization, activation, and spectral normalization.
         Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
     """
-    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.InstanceNorm2d(affine=True),
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=True):
-        super(HardEncoder, self).__init__()
+        super(Encoder_1, self).__init__()
 
         # Define encoder blocks
         self.encoder_blocks = nn.Sequential(
-            Encoder_Block(input_nc, generator_filter_num*2, norm_layer, activation, use_spect),
-            Encoder_Block(generator_filter_num*2, generator_filter_num*4, norm_layer, activation, use_spect),
-            Encoder_Block(generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect),
-            Encoder_Block(generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect)
+            Encoder_Block(input_nc, generator_filter_num*2, generator_filter_num, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*2, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*4, generator_filter_num*8, generator_filter_num*8, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*8, generator_filter_num*16, generator_filter_num*16, norm_layer, activation, use_spect)
+        )
+    def forward(self, x):
+        x = self.encoder_blocks(x)
+        return x
+
+
+class Decoder_1(nn.Module):
+    """
+        Hard Encoder with configurable normalization, activation, and spectral normalization.
+        Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
+    """
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d,
+                 activation=nn.LeakyReLU(0.1), use_spect=True):
+        super(Decoder_1, self).__init__()
+
+        # Define residual blocks in the decoder
+        self.res_blocks = nn.Sequential(
+            Res_Block_Decoder(generator_filter_num*16, generator_filter_num*8, generator_filter_num*8, norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            Res_Block_Decoder(generator_filter_num * 8, generator_filter_num * 4, generator_filter_num * 4,norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 2, generator_filter_num * 2,norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            Res_Block_Decoder(generator_filter_num * 2, generator_filter_num, generator_filter_num,norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+        )
+
+
+    def forward(self, x):
+        x = self.res_blocks(x)
+        return x
+
+
+
+class Parsing_Generator(nn.Module):
+    """
+        Hard Encoder with configurable normalization, activation, and spectral normalization.
+        Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
+    """
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d,
+                 activation=nn.LeakyReLU(0.1), use_spect=True, kernel_size=3):
+        super(Parsing_Generator, self).__init__()
+
+        # Define encoder blocks
+        self.encoder_1 = Encoder_1(input_nc, generator_filter_num, norm_layer, activation, use_spect)
+
+
+        # Define residual blocks in the decoder
+        self.decoder_1 = Decoder_1(input_nc, generator_filter_num, norm_layer, activation, use_spect)
+
+
+        # Define gated convolutions
+        self.gated_convs = nn.Sequential(
+            Gated_Conv(generator_filter_num*16, generator_filter_num*16),
+            Gated_Conv(generator_filter_num*16, generator_filter_num*16)
+        )
+
+        kwargs = {'kernel_size': kernel_size, 'padding':0, 'bias': True}
+
+
+        self.output = nn.Sequential(
+            norm_layer(input_nc),
+            activation,
+            nn.ReflectionPad2d(int((kernel_size - 1) / 2)),
+            Coord_Conv(input_nc, 8, use_spect=use_spect, **kwargs),
+            nn.Tanh()
+        )
+
+    def forward(self, x):
+        x = self.encoder_1(x)
+        x = self.gated_convs(x)
+        x = self.decoder_1(x)
+        x = self.output(x)
+        # x = (x + 1.) / 2. TODO test
+        return x
+
+
+class Encoder_2(nn.Module):
+    """
+        Hard Encoder with configurable normalization, activation, and spectral normalization.
+        Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
+    """
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d, shortcut=nn.Identity,
+                 activation=nn.LeakyReLU(0.1), use_spect=True):
+        super(Encoder_2, self).__init__()
+
+        # Define encoder blocks
+        self.encoder_blocks = nn.Sequential(
+            Encoder_Block(input_nc, generator_filter_num*2, None, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*2, generator_filter_num*4, None, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*4, generator_filter_num*4, None, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*4, generator_filter_num*4, None, norm_layer, activation, use_spect)
         )
 
         # Define residual blocks in the decoder
         self.res_blocks = nn.Sequential(
-            Res_Block_Decoder(generator_filter_num*4, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect),
-            Res_Block_Decoder(generator_filter_num*4, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect)
+            Res_Block_Decoder(generator_filter_num*4, generator_filter_num*4, generator_filter_num*4, norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            Res_Block_Decoder(generator_filter_num*4, generator_filter_num*4, generator_filter_num*4, norm_layer=norm_layer, activation=activation, use_spect=use_spect)
         )
 
         # Define gated convolutions
