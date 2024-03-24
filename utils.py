@@ -3,7 +3,7 @@ import torch
 from torch.nn.utils.spectral_norm import spectral_norm
 import torchvision
 import os
-
+import torch.nn.functional as F
 
 class Coord_Conv(nn.Module):
     """
@@ -357,3 +357,88 @@ class Encoder_2(nn.Module):
         x = self.gated_convs(x)
         x = self.res_blocks(x)
         return x
+
+
+class Encoder_3(nn.Module):
+    """
+        Hard Encoder with configurable normalization, activation, and spectral normalization.
+        Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
+    """
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
+                 activation=nn.LeakyReLU(0.1), use_spect=True):
+        super(Encoder_3, self).__init__()
+
+        # Define encoder blocks
+        self.encoder_blocks = nn.Sequential(
+            Encoder_Block(input_nc, generator_filter_num*2, None, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*2, generator_filter_num*4, None, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*4, generator_filter_num*4, None, norm_layer, activation, use_spect),
+            Encoder_Block(generator_filter_num*4, generator_filter_num*4, None, norm_layer, activation, use_spect)
+        )
+
+    def forward(self, x):
+        x = self.encoder_blocks(x)
+        return x
+
+
+class Per_Region_Encoding(nn.Module):
+    """
+        Per-Region Encoding with configurable normalization, activation, and spectral normalization.
+    """
+    def __init__(self, segmentation, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
+                 activation=nn.LeakyReLU(0.1), use_spect=True):
+        super(Per_Region_Encoding, self).__init__()
+
+        # Define residual blocks in the decoder
+        self.blocks = nn.Sequential(
+            Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
+                              norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
+                              norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
+                              norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            nn.Conv2d(256, 256, kernel_size=1, padding=0),
+            nn.Tanh()
+        )
+        self.segmentation = segmentation
+
+
+    def forward(self, x):
+        x = self.blocks(x)
+        segmentation_map = F.interpolate(self.segmentation, size=x.size()[2:], mode='nearest')
+
+        bs, cs, hs, ws = x.shape
+        s_size = segmentation_map.shape[1]
+        codes_vector = torch.zeros((bs, s_size + 1, cs), dtype=x.dtype, device=x.device)
+        exist_vector = torch.zeros((bs, s_size), dtype=x.dtype, device=x.device)
+        for i in range(bs):
+            for j in range(s_size):
+                component_mask_area = torch.sum(segmentation_map.bool()[i, j])
+                if component_mask_area > 0:
+                    codes_component_feature = x[i].masked_select(segmentation_map.bool()[i, j]).reshape(cs,
+                                                                                                component_mask_area).mean(
+                        1)
+                    codes_vector[i][j] = codes_component_feature
+                    exist_vector[i][j] = 1
+
+            feat = x[i].reshape(1, cs, hs, ws)
+            feat_mean = feat.view(1, cs, -1).mean(dim=2).view(1, cs, 1, 1)
+
+            codes_vector[i][s_size] = feat_mean.squeeze()
+
+        return codes_vector, exist_vector, x
+
+class Per_Region_Generator(nn.Module):
+    """
+    Per region generator with configurable normalization, activation, and spectral normalization.
+    It uses Encoder_3 and Per_Region_Encoding for final encoding.
+    """
+    def __init__(self, image, segmentation, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
+                 activation=nn.LeakyReLU(0.1), use_spect=True):
+        self.encode = Encoder_3(image, generator_filter_num, norm_layer, activation, use_spect)
+        self.per_region_encode = Per_Region_Encoding(segmentation, generator_filter_num, norm_layer, activation, use_spect)
+
+    def forward(self, x):
+        x = self.encode(x)
+        codes_vector, exist_vector, x = self.per_region_encode(x)
+        return codes_vector, exist_vector, x
