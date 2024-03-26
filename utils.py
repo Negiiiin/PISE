@@ -442,3 +442,36 @@ class Per_Region_Generator(nn.Module):
         x = self.encode(x)
         codes_vector, exist_vector, x = self.per_region_encode(x)
         return codes_vector, exist_vector, x
+
+
+
+# TODO more work needed
+class Per_Region_Normalization(nn.Module):
+    """
+    This class implements a feature extraction block that applies normalization
+    and conditional style-based modulation to an input feature map based on segmentation
+    maps and style codes.
+    """
+    def __init__(self, input_channels, style_length=256, kernel_size=3,  norm_layer=nn.BatchNorm2d):
+        super(Per_Region_Normalization, self).__init__()
+        self.norm = norm_layer(input_channels)
+        self.style_length = style_length
+        self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
+        self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
+        # self._create_gamma_beta_fc_layers(input_channels)
+
+    def forward(self, x, segmap, style_codes, exist_codes):
+        """
+        Forward pass of the FeatureExtractionBlock.
+        """
+        segmap_resized = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        normalized_features = self.norm(x)
+        # Processing steps to compute middle_avg, gamma_avg, and beta_avg
+        # based on `segmap`, `style_codes`, and `exist_codes`
+        # The logic should be refactored into smaller helper methods if necessary
+        # Example:
+        # middle_avg = self._compute_middle_avg(segmap_resized, style_codes, exist_codes, normalized_features)
+        # gamma_avg, beta_avg = self._apply_conv_layers(middle_avg)
+        # Output computation:
+        out = normalized_features * (1 + gamma_avg) + beta_avg
+        return out
