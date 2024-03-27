@@ -458,20 +458,30 @@ class Per_Region_Normalization(nn.Module):
         self.style_length = style_length
         self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
         self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
-        # self._create_gamma_beta_fc_layers(input_channels)
+        self.fc_mu_layers = nn.ModuleList([nn.Linear(style_length, style_length) for _ in range(8)]) # We can use 1D convolutions instead of linear layers as well!
 
     def forward(self, x, segmap, style_codes, exist_codes):
-        """
-        Forward pass of the FeatureExtractionBlock.
-        """
-        segmap_resized = F.interpolate(segmap, size=x.size()[2:], mode='nearest')
+        """Applies normalization and conditional style modulation to the input features."""
+        segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest') # resize segmap to match the input feature map
         normalized_features = self.norm(x)
-        # Processing steps to compute middle_avg, gamma_avg, and beta_avg
-        # based on `segmap`, `style_codes`, and `exist_codes`
-        # The logic should be refactored into smaller helper methods if necessary
-        # Example:
-        # middle_avg = self._compute_middle_avg(segmap_resized, style_codes, exist_codes, normalized_features)
-        # gamma_avg, beta_avg = self._apply_conv_layers(middle_avg)
-        # Output computation:
+        b_size, _, h_size, w_size = normalized_features.shape
+        middle_avg = torch.zeros((b_size, self.style_length, h_size, w_size), device=normalized_features.device)
+
+        for i in range(b_size):
+            for j in range(segmap.shape[1]):
+                component_mask = segmap.bool()[i, j]
+                component_mask_area = torch.sum(component_mask)
+                if component_mask_area > 0:
+                    style_code_idx = j if exist_codes[i][j] == 1 else segmap.shape[1]
+                    middle_mu = F.relu(self.fc_mu_layers[j](style_codes[i][style_code_idx]))
+                    component_mu = middle_mu.view(self.style_length, 1).expand(-1, component_mask_area)
+                    middle_avg[i].masked_scatter_(component_mask, component_mu)
+                else: # gpt suggested remove the else! wonder why
+                    middle_mu = F.relu(self.fc_mu_layers[j](style_codes[i].mean(0,keepdim=False)))
+                    component_mu = middle_mu.reshape(self.style_length, 1).expand(self.style_length, component_mask_area)
+                    middle_avg[i].masked_scatter_(segmap.bool()[i, j], component_mu)
+
+        gamma_avg = self.conv_gamma(middle_avg)
+        beta_avg = self.conv_beta(middle_avg)
         out = normalized_features * (1 + gamma_avg) + beta_avg
         return out
