@@ -4,6 +4,12 @@ from torch.nn.utils.spectral_norm import spectral_norm
 import torchvision
 import os
 import torch.nn.functional as F
+import loss
+import numpy as np
+from PIL import Image
+import ntpath
+from torch.nn import init
+import warnings
 
 class Coord_Conv(nn.Module):
     """
@@ -47,7 +53,7 @@ class Encoder_Block(nn.Module):
         ############################################
 
         hidden_channel = hidden_channel or conv_out_channel
-        # Initialize convolutional layers
+
         self.conv1 = self._coord_conv(conv_in_channel, hidden_channel, use_spect, use_coord, **kwargs_down)
         self.conv2 = self._coord_conv(hidden_channel, conv_out_channel, use_spect, use_coord, **kwargs_fine)
 
@@ -209,31 +215,32 @@ class Res_Block_Decoder(nn.Module):
 
         hidden_nc = hidden_nc or input_nc
 
-        if use_spect:
-            spec_norm_func = spectral_norm
-        else:
-            spec_norm_func = nn.Identity
+        conv1 = nn.Conv2d(input_nc, hidden_nc, kernel_size=3, stride=1, padding=1)
+        conv2 = nn.ConvTranspose2d(hidden_nc, output_nc, kernel_size=3, stride=2, padding=1, output_padding=1)
 
-        # Main convolutional layers with optional spectral normalization
+        if use_spect:
+            conv1 = spectral_norm(conv1)
+            conv2 = spectral_norm(conv2)
+
         layers = [
             norm_layer(input_nc),
-            spec_norm_func(nn.Conv2d(input_nc, hidden_nc, kernel_size=3, stride=1, padding=1)),
+            conv1,
             activation,
             norm_layer(hidden_nc),
-            spec_norm_func(nn.ConvTranspose2d(hidden_nc, output_nc, kernel_size=3, stride=2, padding=1, output_padding=1))
+            conv2
         ]
 
         self.model = nn.Sequential(*layers)
 
+        shortcut = nn.ConvTranspose2d(input_nc, output_nc, kernel_size=3, stride=2, padding=1, output_padding=1)
+        if use_spect:
+            shortcut = spectral_norm(shortcut)
+
         # Shortcut connection with optional spectral normalization
-        self.shortcut = nn.Sequential(
-            spec_norm_func(nn.ConvTranspose2d(input_nc, output_nc, kernel_size=3, stride=2, padding=1, output_padding=1))
-        )
+        self.shortcut = nn.Sequential(shortcut)
 
     def forward(self, x):
         return self.model(x) + self.shortcut(x)
-
-
 
 class Encoder_1(nn.Module):
     """
@@ -254,7 +261,6 @@ class Encoder_1(nn.Module):
     def forward(self, x):
         x = self.encoder_blocks(x)
         return x
-
 
 class Decoder_1(nn.Module):
     """
@@ -277,8 +283,6 @@ class Decoder_1(nn.Module):
     def forward(self, x):
         x = self.res_blocks(x)
         return x
-
-
 
 class Parsing_Generator(nn.Module):
     """
@@ -322,7 +326,6 @@ class Parsing_Generator(nn.Module):
         # x = (x + 1.) / 2. TODO test
         return x
 
-
 class Encoder_2(nn.Module):
     """
         Hard Encoder with configurable normalization, activation, and spectral normalization.
@@ -357,6 +360,7 @@ class Encoder_2(nn.Module):
         x = self.gated_convs(x)
         x = self.res_blocks(x)
         return x
+
 
 
 class Encoder_3(nn.Module):
@@ -443,9 +447,6 @@ class Per_Region_Generator(nn.Module):
         codes_vector, exist_vector, x = self.per_region_encode(x)
         return codes_vector, exist_vector, x
 
-
-
-# TODO more work needed
 class Per_Region_Normalization(nn.Module):
     """
     This class implements a feature extraction block that applies normalization
@@ -485,3 +486,348 @@ class Per_Region_Normalization(nn.Module):
         beta_avg = self.conv_beta(middle_avg)
         out = normalized_features * (1 + gamma_avg) + beta_avg
         return out
+
+
+
+# ----------------------------------------------- Discriminator -----------------------------------------------
+
+
+class Res_Block_Encoder(nn.Module):
+    """
+    Residual Block for Encoder
+    """
+    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d, activation=nn.LeakyReLU, use_spect=False):
+        super(Res_Block_Encoder, self).__init__()
+
+        hidden_nc = hidden_nc or input_nc
+
+        conv1 = nn.Conv2d(input_nc, hidden_nc, 3, stride=1, padding=1)
+        conv2 = nn.Conv2d(hidden_nc, output_nc, 4, stride=2, padding=1)
+
+        if use_spect:
+            conv1 = spectral_norm(conv1)
+            conv2 = spectral_norm(conv2)
+
+        layers = [
+            conv1,
+            norm_layer(hidden_nc),
+            activation(),
+            conv2,
+            norm_layer(output_nc)
+        ]
+
+        # Shortcut to match dimensions and add bypass
+        shortcut = [
+            nn.AvgPool2d(2, stride=2),
+            spectral_norm(nn.Conv2d(input_nc, output_nc, 1, stride=1, padding=0), use_spect)
+        ]
+
+        self.model = nn.Sequential(*layers)
+        self.shortcut = nn.Sequential(*shortcut)
+
+    def forward(self, x):
+        return self.model(x) + self.shortcut(x)
+
+
+class Discriminator(nn.Module):
+    def __init__(self, input_nc=3, ndf=64, img_f=1024, layers=6, norm_layer=nn.Identity(), activation=nn.LeakyReLU,
+                 use_spect=True):
+        super(Discriminator, self).__init__()
+        self.layers = layers
+        self.activation = activation
+
+        self.blocks = [Res_Block_Encoder(input_nc if i == 0 else ndf * min(2 ** (i - 1), img_f // ndf),
+                                       ndf * min(2 ** i, img_f // ndf),
+                                       ndf * min(2 ** (i - 1), img_f // ndf) if i > 0 else ndf,
+                                       norm_layer, activation, use_spect) for i in range(layers)]
+
+        self.blocks = nn.ModuleList(self.blocks)
+        self.final_conv = spectral_norm(nn.Conv2d(ndf * min(2 ** (layers - 1), img_f // ndf), 1, 1))
+
+    def forward(self, x):
+        for block in self.blocks:
+            x = block(x)
+        return self.final_conv(self.activation(x))
+
+
+class Final_Model(nn.Module):
+    def __init__(self, gpu_ids, device, save_dir, lr=1e-4, ratio_g2d=0.1):
+        super(Final_Model, self).__init__()
+        self.gpu_ids = gpu_ids
+        self.is_train = True
+        self.optimizers = []
+        self.device = device
+        self.save_dir = save_dir
+
+        # Define the generator
+        # self.generator = TODO
+        self.discriminator = Discriminator(ndf=32, img_f=128, layers=4)
+
+        # Initialize loss functions and optimizers if training
+        if self.isTrain:
+            self.init_losses_and_optimizers(device, lr, ratio_g2d)
+
+    def init_weights(self, gain=0.02):
+        # Iterate over all modules in the model
+        for m in self.modules():
+            class_name = m.__class__.__name__
+            # Initialize weights for BatchNorm2d layers
+            if class_name.find('BatchNorm2d') != -1:
+                if hasattr(m, 'weight') and m.weight is not None:
+                    init.normal_(m.weight.data, 1.0, gain)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant_(m.bias.data, 0.0)
+            # Initialize weights for Conv and Linear layers using orthogonal initialization
+            elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):
+                init.orthogonal_(m.weight.data, gain=gain)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant_(m.bias.data, 0.0)
+
+    def init_losses_and_optimizers(self, device, lr, ratio_g2d):
+        self.GAN_loss = loss.Adversarial_Loss().to(device)
+        self.L1_loss = nn.L1Loss()
+        self.VGG_loss = loss.VGG_Loss().to(device)
+        self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
+
+        # Optimizer for the generator
+        self.optimizer_G = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.generator.parameters()),
+            lr=lr, betas=(0.9, 0.999)
+        )
+        self.optimizers.append(self.optimizer_G)
+
+        # Optimizer for the discriminator
+        self.optimizer_D = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.discriminator.parameters()),
+            lr=lr * ratio_g2d, betas=(0.9, 0.999)
+        )
+        self.optimizers.append(self.optimizer_D)
+
+    def set_input(self, input):
+        self.input = input
+        self.image_paths = []
+
+        # Define keys for easier readability and modification
+        keys = ['P1', 'BP1', 'SPL1', 'P2', 'BP2', 'SPL2']
+        # Automatically transfer all tensors to the specified device
+        for key in keys:
+            if key in input:
+                setattr(self, 'input_' + key, input[key].to(self.device))
+
+        self.label_P2 = input['label_P2'].to(self.device)
+
+        # Handle image paths separately as they are not tensors
+        for i in range(input['P1'].size(0)):  # Assuming 'P1' exists and has a batch dimension
+            path = '_'.join([os.path.splitext(input[path_key][i])[0] for path_key in ['P1_path', 'P2_path']])
+            self.image_paths.append(path)
+
+    def forward(self):
+        pass
+
+    def backward_D(self, real_input, fake_input, unfreeze_netD=True):
+        """Calculate the GAN loss for the discriminator, including handling WGAN-GP if specified."""
+        if unfreeze_netD:
+            # Unfreeze the discriminator if it was frozen
+            for param in self.discriminator.parameters():
+                param.requires_grad = True
+
+        # Real input loss
+        D_real = self.discriminator(real_input)
+        D_real_loss = self.GAN_loss(D_real, True)
+
+        # Fake input loss (detach to avoid backproping into the generator)
+        D_fake = self.discriminator(fake_input.detach())
+        D_fake_loss = self.GAN_loss(D_fake, False)
+
+        # Combined discriminator loss
+        D_loss = (D_real_loss + D_fake_loss) * 0.5
+
+        # Backpropagate the discriminator loss
+        D_loss.backward()
+
+        return D_loss
+
+    def backward_G(self, lambda_regularization=30.0, lambda_rec=5.0, lambda_pl=100.0, lambda_a=2.0, lambda_style=200.0, lambda_content=0.5):
+        """Calculate training loss for the generator."""
+        # Initialize total loss
+        total_loss = 0
+
+        # Parsing Generator two losses ---------------------------
+        label_P2 = self.label_P2.squeeze(1).long()
+        self.parsing_gen_cross = self.parLoss(self.parsav, label_P2)
+        self.parsing_gen_l1 = self.L1_loss(self.parsav,
+                                           self.input_SPL2) * lambda_pl  # l1 distance loss between the generated parsing map and the target parsing map
+        total_loss += self.parsing_gen_cross + self.parsing_gen_l1
+
+        # Image generator losses ---------------------------------
+        # Regularization loss
+        self.L_cor = self.loss_reg * lambda_regularization # self.loss_reg is an output of the generator - Lcor TODO
+        total_loss += self.L_cor
+
+        # L1 loss (Appearance loss)
+        self.L_l1 = self.L1_loss(self.generated_img, self.input_P2) * lambda_rec # Ll1 - self.generated_img is an output of the generator - TODO
+        total_loss += self.L_l1
+
+        # Freeze the discriminator for the generator's backward pass
+        for param in self.net_D.parameters():
+            param.requires_grad = False
+
+        # GAN loss (Adversarial loss)
+        D_fake = self.discriminator(self.generated_img) #TODO
+        self.loss_adv = self.GAN_loss(D_fake, True, False) * lambda_a
+        total_loss += self.loss_adv
+
+        # Perceptual loss (Content and Style)
+        self.loss_content_gen, self.loss_style_gen = self.VGG_loss(self.generated_img, self.input_P2) #TODO
+        self.loss_style_gen *= lambda_style
+        self.loss_content_gen *= lambda_content
+        total_loss += self.loss_content_gen + self.loss_style_gen
+
+        # Backpropagate the total loss
+        total_loss.backward()
+
+    def optimize_parameters(self):
+        """
+            Update network weights by performing a forward pass, then optimizing the discriminator and generator.
+        """
+        self.forward()
+
+        self.optimizer_D.zero_grad()
+        self.backward_D()
+        self.optimizer_D.step()
+
+        # Optimize the generator
+        self.optimizer_G.zero_grad()
+        self.backward_G()
+        self.optimizer_G.step()
+
+    def save_results(self, save_data, results_dir="./eval_results", data_name='none', data_ext='jpg'):
+        """
+            Save the training or testing results to disk.
+        """
+
+        for i, img_path in enumerate(self.image_paths):
+            print(f'Processing image: {img_path}')
+            # Extract the base name without the directory path and extension
+            base_name = os.path.splitext(ntpath.basename(img_path))[0]
+            img_name = f"{base_name}_{data_name}.{data_ext}"
+
+            # Construct the full path for saving the image
+            full_img_path = os.path.join(results_dir, img_name)
+
+            # Convert the tensor to a numpy image and save
+            img_numpy = tensor2im(save_data[i])
+            save_image(img_numpy, full_img_path)
+
+    def save_networks(self, epoch):
+        """
+            Save all the networks to the disk.
+        """
+        save_filename = f"{epoch}_generator.pth"
+        save_path = os.path.join(self.save_dir, save_filename)
+
+        torch.save(self.generator.cpu().state_dict(), save_path)
+        self.generator.to(self.device)
+
+        save_filename = f"{epoch}_generator.pth"
+        save_path = os.path.join(self.save_dir, save_filename)
+
+        torch.save(self.discriminator.cpu().state_dict(), save_path)
+        self.discriminator.to(self.device)
+
+    def load_networks(self, epoch):
+        """
+            Load all the networks from the disk.
+        """
+        for name, net in zip(["generator", "discriminator"], [self.generator, self.discriminator]):
+            filename = f"{epoch}_{name}.pth"
+            path = os.path.join(self.save_dir, filename)
+
+            if not os.path.isfile(path):
+                warnings.warn(f"Checkpoint not found for network {name} at {path}", RuntimeWarning)
+                continue
+
+            state_dict = torch.load(path, map_location=self.device)
+            model_dict = net.state_dict()
+
+            # Filter out unnecessary keys
+            state_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.size() == model_dict[k].size()}
+            # Update current model state dict
+            model_dict.update(state_dict)
+            net.load_state_dict(model_dict)
+
+            print(f"Loaded {name} from {filename}")
+
+            if not self.is_train:
+                net.eval()
+
+
+# From resource code -----------------------------------------------------------------------
+
+def tensor2im(image_tensor, bytes=255.0, need_dec=False, imtype=np.uint8):
+    if image_tensor.dim() == 3:
+        image_numpy = image_tensor.cpu().float().numpy()
+    else:
+        image_numpy = image_tensor[0].cpu().float().numpy()
+
+    image_numpy = np.transpose(image_numpy, (1, 2, 0))
+    if need_dec:
+        image_numpy = decode_labels(image_numpy.astype(int))
+    else:
+        image_numpy = (image_numpy + 1) / 2.0 * bytes
+
+    return image_numpy.astype(imtype)
+
+# label color
+label_colours = [(0, 0, 0)
+    , (128, 0, 0), (255, 0, 0), (0, 85, 0), (170, 0, 51), (255, 85, 0), (0, 0, 85), (0, 119, 221), (85, 85, 0),
+                 (0, 85, 85), (85, 51, 0), (52, 86, 128), (0, 128, 0)
+    , (0, 0, 255), (51, 170, 221), (0, 255, 255), (85, 255, 170), (170, 255, 85), (255, 255, 0), (255, 170, 0)]
+
+def decode_labels(mask, num_images=1, num_classes=20):
+    """
+        Decode batch of segmentation masks.
+
+        Args:
+          mask: result of inference after taking argmax.
+          num_images: number of images to decode from the batch.
+          num_classes: number of classes to predict (including background).
+
+        Returns:
+          A batch with num_images RGB images of the same size as the input.
+    """
+    h, w, c = mask.shape
+    # assert(n >= num_images), 'Batch size %d should be greater or equal than number of images to save %d.' % (n, num_images)
+    outputs = np.zeros((h, w, 3), dtype=np.uint8)
+
+    img = Image.new('RGB', (len(mask[0]), len(mask)))
+    pixels = img.load()
+    tmp = []
+    tmp1 = []
+    for j_, j in enumerate(mask[:, :, 0]):
+        for k_, k in enumerate(j):
+            # tmp1.append(k)
+            # tmp.append(k)
+            if k < num_classes:
+                pixels[k_, j_] = label_colours[k]
+    # np.save('tmp1.npy', tmp1)
+    # np.save('tmp.npy',tmp)
+    outputs = np.array(img)
+    # print(outputs[144,:,0])
+    return outputs
+
+def save_image(image_numpy, image_path):
+    # Handle grayscale images (with a single channel)
+    if image_numpy.shape[2] == 1:
+        image_numpy = image_numpy.squeeze(axis=2)  # Remove the channel dimension
+
+    # Handle images with 8 channels by converting them to a label map
+    elif image_numpy.shape[2] == 8:
+        image_numpy = np.argmax(image_numpy, axis=2)  # Convert channel dimension to label map
+        image_numpy = decode_labels(image_numpy)  # Assume decode_labels returns an RGB image
+
+    # Save the image
+    image = Image.fromarray(image_numpy)
+    image.save(image_path)
+
+# From resource code -----------------------------------------------------------------------
