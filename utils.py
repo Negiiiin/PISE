@@ -11,6 +11,8 @@ import ntpath
 from torch.nn import init
 import warnings
 
+import VGG19
+
 class Coord_Conv(nn.Module):
     """
         This class adds coordinate channels to the input tensor.
@@ -284,6 +286,35 @@ class Decoder_1(nn.Module):
         x = self.res_blocks(x)
         return x
 
+
+
+
+
+class Decoder_2(nn.Module):
+    def __init__(self, output_nc, ngf=64,kernel_size=3, norm_layer=nn.BatchNorm2d,
+                 activation=nn.LeakyReLU(0.1), use_spect=True):
+        super(Decoder_2, self).__init__()
+
+
+        kwargs = {'kernel_size': kernel_size, 'padding': 0, 'bias': True}
+        self.model = nn.Sequential(
+            Res_Block_Decoder(ngf*4, ngf*2, ngf*4, norm_layer, activation, use_spect),
+            Res_Block(ngf*2, ngf*2, ngf*2, norm_layer, activation, False, use_spect, False),
+            Res_Block_Decoder(ngf*2, ngf, ngf*2, norm_layer, activation, use_spect),
+            Res_Block(ngf, ngf, ngf, norm_layer, activation, False, use_spect, False),
+            norm_layer(output_nc),
+            activation,
+            nn.ReflectionPad2d(int((kernel_size - 1) / 2)),
+            Coord_Conv(output_nc, 8, use_spect=use_spect, **kwargs),
+            nn.Tanh()
+        )
+
+
+
+    def forward(self, input):
+        return self.model(input)
+
+
 class Parsing_Generator(nn.Module):
     """
         Hard Encoder with configurable normalization, activation, and spectral normalization.
@@ -389,7 +420,7 @@ class Per_Region_Encoding(nn.Module):
     """
         Per-Region Encoding with configurable normalization, activation, and spectral normalization.
     """
-    def __init__(self, segmentation, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
+    def __init__(self, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Per_Region_Encoding, self).__init__()
 
@@ -404,12 +435,11 @@ class Per_Region_Encoding(nn.Module):
             nn.Conv2d(256, 256, kernel_size=1, padding=0),
             nn.Tanh()
         )
-        self.segmentation = segmentation
 
 
-    def forward(self, x):
+    def forward(self,x, segmentation):
         x = self.blocks(x)
-        segmentation_map = F.interpolate(self.segmentation, size=x.size()[2:], mode='nearest')
+        segmentation_map = F.interpolate(segmentation, size=x.size()[2:], mode='nearest')
 
         bs, cs, hs, ws = x.shape
         s_size = segmentation_map.shape[1]
@@ -420,8 +450,7 @@ class Per_Region_Encoding(nn.Module):
                 component_mask_area = torch.sum(segmentation_map.bool()[i, j])
                 if component_mask_area > 0:
                     codes_component_feature = x[i].masked_select(segmentation_map.bool()[i, j]).reshape(cs,
-                                                                                                component_mask_area).mean(
-                        1)
+                                                                                                component_mask_area).mean(1)
                     codes_vector[i][j] = codes_component_feature
                     exist_vector[i][j] = 1
 
@@ -432,20 +461,6 @@ class Per_Region_Encoding(nn.Module):
 
         return codes_vector, exist_vector, x
 
-class Per_Region_Generator(nn.Module):
-    """
-    Per region generator with configurable normalization, activation, and spectral normalization.
-    It uses Encoder_3 and Per_Region_Encoding for final encoding.
-    """
-    def __init__(self, image, segmentation, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
-                 activation=nn.LeakyReLU(0.1), use_spect=True):
-        self.encode = Encoder_3(image, generator_filter_num, norm_layer, activation, use_spect)
-        self.per_region_encode = Per_Region_Encoding(segmentation, generator_filter_num, norm_layer, activation, use_spect)
-
-    def forward(self, x):
-        x = self.encode(x)
-        codes_vector, exist_vector, x = self.per_region_encode(x)
-        return codes_vector, exist_vector, x
 
 class Per_Region_Normalization(nn.Module):
     """
@@ -459,28 +474,28 @@ class Per_Region_Normalization(nn.Module):
         self.style_length = style_length
         self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
         self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
-        self.fc_mu_layers = nn.ModuleList([nn.Linear(style_length, style_length) for _ in range(8)]) # We can use 1D convolutions instead of linear layers as well!
+        self.fc_mu_layers = nn.ModuleList([nn.Linear(style_length, style_length) for _ in range(8)]) # TODO We can use 1D convolutions instead of linear layers as well!
 
-    def forward(self, x, segmap, style_codes, exist_codes):
+    def forward(self, fp, sg, style_codes, mask_codes): #style code is per region encoding output(P(sj)
         """Applies normalization and conditional style modulation to the input features."""
-        segmap = F.interpolate(segmap, size=x.size()[2:], mode='nearest') # resize segmap to match the input feature map
-        normalized_features = self.norm(x)
+        sg = F.interpolate(sg, size=fp.size()[2:], mode='nearest') # resize sg to match the input feature map
+        normalized_features = self.norm(fp)
         b_size, _, h_size, w_size = normalized_features.shape
         middle_avg = torch.zeros((b_size, self.style_length, h_size, w_size), device=normalized_features.device)
 
         for i in range(b_size):
-            for j in range(segmap.shape[1]):
-                component_mask = segmap.bool()[i, j]
+            for j in range(sg.shape[1]):
+                component_mask = sg.bool()[i, j]
                 component_mask_area = torch.sum(component_mask)
                 if component_mask_area > 0:
-                    style_code_idx = j if exist_codes[i][j] == 1 else segmap.shape[1]
+                    style_code_idx = j if mask_codes[i][j] == 1 else sg.shape[1]
                     middle_mu = F.relu(self.fc_mu_layers[j](style_codes[i][style_code_idx]))
                     component_mu = middle_mu.view(self.style_length, 1).expand(-1, component_mask_area)
                     middle_avg[i].masked_scatter_(component_mask, component_mu)
                 else: # gpt suggested remove the else! wonder why
                     middle_mu = F.relu(self.fc_mu_layers[j](style_codes[i].mean(0,keepdim=False)))
                     component_mu = middle_mu.reshape(self.style_length, 1).expand(self.style_length, component_mask_area)
-                    middle_avg[i].masked_scatter_(segmap.bool()[i, j], component_mu)
+                    middle_avg[i].masked_scatter_(sg.bool()[i, j], component_mu)
 
         gamma_avg = self.conv_gamma(middle_avg)
         beta_avg = self.conv_beta(middle_avg)
@@ -550,6 +565,64 @@ class Discriminator(nn.Module):
         return self.final_conv(self.activation(x))
 
 
+class Generator(nn.Module):
+    def __init__(self, image_nc=3, structure_nc=18, output_nc=3, ngf=64, norm_layer=nn.InstanceNorm2d(affine=True),
+                     activation=nn.LeakyReLU, use_spect=True, use_coord=False):
+            super(Generator, self).__init__()
+
+            self.use_coordconv = True
+            self.match_kernel = 3
+
+
+            self.parsing_generator = Parsing_Generator(8 + 18 * 2, 8)
+
+            self.encoder_3 = Encoder_3(3, ngf)  # encoder that gets image S as input
+            self.per_region_encoding = Per_Region_Encoding(ngf)
+
+
+            self.vgg19 = VGG19()
+            # self.getMatrix = GetMatrix(ngf * 4, 1)
+
+            # self.phi = nn.Conv2d(in_channels=ngf * 4 + 3, out_channels=ngf * 4, kernel_size=1, stride=1, padding=0)
+            # self.theta = nn.Conv2d(in_channels=ngf * 4 + 3, out_channels=ngf * 4, kernel_size=1, stride=1, padding=0)
+
+            self.encoder_2 = Encoder_2(8 + 18 + 8 + 3, ngf)  # encoder that gets parsing and 3 other inputs
+
+            self.decoder_2 = Decoder_2(3, ngf)
+
+            self.per_region_normalization = Per_Region_Normalization(ngf * 4, 256)  # spatial aware normalization $ per region normalization
+            # self.res = ResBlock(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=norm_layer,
+            #                     nonlinearity=activation,
+            #                     learnable_shortcut=False, use_spect=False, use_coord=False)
+            #
+            # self.res1 = ResBlock(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=norm_layer,
+            #                      nonlinearity=activation,
+            #                      learnable_shortcut=False, use_spect=False, use_coord=False)
+
+
+    def forward(self, img1, img2, pose1, pose2, par1, par2):
+        encoder_3 = self.encoder_3(img1)
+        codes_vector, exist_vector, img1code = self.per_region_encoding(encoder_3, par1)  # Fi
+
+        parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1))  # parsing utput
+        par2 = parcode
+
+        parcode = self.encoder_2(torch.cat((par1, par2, pose2, img1), 1))  # Fp
+
+
+        parcode = self.per_region_normalization(parcode, par2, codes_vector, exist_vector)
+        # parcode = self.res(parcode)
+
+        ## regularization to let transformed code and target image code in the same feature space
+
+        img2code = self.vgg19(img2)  # VGG output of original image
+        loss_reg = F.mse_loss(img2code, parcode)
+
+        parcode = self.decoder_2(parcode)
+        return parcode, loss_reg, par2
+
+
+
 class Final_Model(nn.Module):
     def __init__(self, gpu_ids, device, save_dir, lr=1e-4, ratio_g2d=0.1):
         super(Final_Model, self).__init__()
@@ -560,7 +633,7 @@ class Final_Model(nn.Module):
         self.save_dir = save_dir
 
         # Define the generator
-        # self.generator = TODO
+        self.generator = Generator()
         self.discriminator = Discriminator(ndf=32, img_f=128, layers=4)
 
         # Initialize loss functions and optimizers if training
@@ -622,7 +695,7 @@ class Final_Model(nn.Module):
             self.image_paths.append(path)
 
     def forward(self):
-        pass
+        self.generated_img, self.loss_reg, self.parsav = self.net_G(self.input_P1, self.input_P2, self.input_BP1, self.input_BP2, self.input_SPL1, self.input_SPL2) #TODO
 
     def backward_D(self, real_input, fake_input, unfreeze_netD=True):
         """Calculate the GAN loss for the discriminator, including handling WGAN-GP if specified."""
