@@ -11,7 +11,7 @@ import ntpath
 from torch.nn import init
 import warnings
 
-import VGG19
+from VGG19 import VGG19
 
 class Coord_Conv(nn.Module):
     """
@@ -511,7 +511,7 @@ class Res_Block_Encoder(nn.Module):
     """
     Residual Block for Encoder
     """
-    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d, activation=nn.LeakyReLU, use_spect=False):
+    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d(), activation=nn.LeakyReLU(), use_spect=False):
         super(Res_Block_Encoder, self).__init__()
 
         hidden_nc = hidden_nc or input_nc
@@ -534,7 +534,7 @@ class Res_Block_Encoder(nn.Module):
         # Shortcut to match dimensions and add bypass
         shortcut = [
             nn.AvgPool2d(2, stride=2),
-            spectral_norm(nn.Conv2d(input_nc, output_nc, 1, stride=1, padding=0), use_spect)
+            spectral_norm(nn.Conv2d(input_nc, output_nc, 1, stride=1, padding=0))
         ]
 
         self.model = nn.Sequential(*layers)
@@ -566,7 +566,7 @@ class Discriminator(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(self, image_nc=3, structure_nc=18, output_nc=3, ngf=64, norm_layer=nn.InstanceNorm2d(affine=True),
+    def __init__(self, image_nc=3, structure_nc=18, output_nc=3, ngf=64,
                      activation=nn.LeakyReLU, use_spect=True, use_coord=False):
             super(Generator, self).__init__()
 

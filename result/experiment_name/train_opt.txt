@@ -1,0 +1,41 @@
+--------------Options--------------
+angle: False
+batchSize: 8
+checkpoints_dir: ./result
+continue_train: False
+dataroot: ./dataset/fashion_data/
+dataset_mode: fashion
+display_env: experimentname
+display_freq: 200
+display_id: 0
+display_port: 8096
+display_single_pane_ncols: 0
+display_winsize: 256
+eval_iters_freq: 15000
+fid_gt_path: None
+gan_mode: lsgan
+gpu_ids: 0
+image_nc: 3
+isTrain: True
+iter_count: 1
+load_size: 256
+lr: 0.0001
+lr_policy: lambda
+max_dataset_size: 9223372036854775807
+model: rec
+nThreads: 8
+name: experiment_name
+niter: 5000000
+niter_decay: 0
+no_html: False
+old_size: (256, 256)
+phase: train
+print_freq: 200
+save_iters_freq: 20000
+save_latest_freq: 20000
+scale: False
+serial_batches: False
+shift: False
+structure_nc: 18
+which_iter: latest
+----------------End----------------

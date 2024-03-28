@@ -25,6 +25,7 @@ class FashionDataset(BaseDataset):
 
     def get_paths(self, opt):
         root = opt.dataroot
+        root = "./fashion_data"
         phase = opt.phase
         pairLst = os.path.join(root, 'fasion-pairs-%s.csv' %phase)#'fasion-pairs-%s.csv' % phase)
 #        pairLst = os.path.join(root, 'arbf_pres.csv')

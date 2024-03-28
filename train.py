@@ -1,8 +1,8 @@
 import time
 import data as Dataset
 import torch
-from . import visualizer
-
+from util import visualizer
+from options.train_options import TrainOptions
 
 import utils
 
@@ -20,8 +20,12 @@ opt = {
     # "display_env":,
     "display_single_pane_ncols": 0,
     "checkpoints_dir": "./results",
-    "save_iters_freq": 5000
+    "save_iters_freq": 5000,
+    "dataset_mode": "fashion",
+    "dataroot": "/content/",
 }
+
+opt = TrainOptions().parse()
 
 if torch.cuda.is_available():
     device = torch.device('cuda:0')
@@ -32,7 +36,7 @@ else:
 
 dataset = Dataset.create_dataloader(opt)
 
-dataset_size = len(dataset) * opt["batchSize"]
+dataset_size = len(dataset) * opt.batchSize
 print('training images = %d' % dataset_size)
 
 keep_training = True
@@ -40,10 +44,11 @@ keep_training = True
 epoch = 0
 
 visualizer = visualizer.Visualizer(opt)
-model = utils.Final_Model(gpu_ids=opt["gpu_ids"], device=device, save_dir=opt["checkpoints_dir"])
+model = utils.Final_Model(gpu_ids=opt.gpu_ids, device=device, save_dir=opt.checkpoints_dir)
+model.init_weights()
 
 # training process
-while (epoch < opt["max_epochs"]):
+while (epoch < opt.max_epochs):
     epoch_start_time = time.time()
     epoch += 1
     print('\n Training epoch: %d' % epoch)
@@ -55,7 +60,7 @@ while (epoch < opt["max_epochs"]):
         model.optimize_parameters()
 
         # save the model every <save_iter_freq> iterations to the disk
-        if i % opt["save_iters_freq"] == 0:
+        if i % opt.save_iters_freq == 0:
             print('saving the model of iterations %d at epoch %d' % (i, epoch))
             model.save_networks(epoch*len(dataset)+i)
 
