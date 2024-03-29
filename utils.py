@@ -511,7 +511,7 @@ class Res_Block_Encoder(nn.Module):
     """
     Residual Block for Encoder
     """
-    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d(), activation=nn.LeakyReLU(), use_spect=False):
+    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d, activation=nn.LeakyReLU(), use_spect=False):
         super(Res_Block_Encoder, self).__init__()
 
         hidden_nc = hidden_nc or input_nc
@@ -525,11 +525,13 @@ class Res_Block_Encoder(nn.Module):
 
         layers = [
             conv1,
-            norm_layer(hidden_nc),
             activation(),
             conv2,
-            norm_layer(output_nc)
         ]
+
+        if norm_layer is not None:
+            layers.insert(1, norm_layer(hidden_nc))
+            layers.append(norm_layer(output_nc))
 
         # Shortcut to match dimensions and add bypass
         shortcut = [
@@ -545,7 +547,7 @@ class Res_Block_Encoder(nn.Module):
 
 
 class Discriminator(nn.Module):
-    def __init__(self, input_nc=3, ndf=64, img_f=1024, layers=6, norm_layer=nn.Identity(), activation=nn.LeakyReLU,
+    def __init__(self, input_nc=3, ndf=64, img_f=1024, layers=6, norm_layer=None, activation=nn.LeakyReLU(),
                  use_spect=True):
         super(Discriminator, self).__init__()
         self.layers = layers
@@ -567,7 +569,7 @@ class Discriminator(nn.Module):
 
 class Generator(nn.Module):
     def __init__(self, image_nc=3, structure_nc=18, output_nc=3, ngf=64,
-                     activation=nn.LeakyReLU, use_spect=True, use_coord=False):
+                     activation=nn.LeakyReLU(), use_spect=True, use_coord=False):
             super(Generator, self).__init__()
 
             self.use_coordconv = True
@@ -624,21 +626,19 @@ class Generator(nn.Module):
 
 
 class Final_Model(nn.Module):
-    def __init__(self, gpu_ids, device, save_dir, lr=1e-4, ratio_g2d=0.1):
+    def __init__(self, opt, lr=1e-4, ratio_g2d=0.1):
         super(Final_Model, self).__init__()
-        self.gpu_ids = gpu_ids
-        self.is_train = True
         self.optimizers = []
-        self.device = device
-        self.save_dir = save_dir
+        self.device = opt.device
+        self.save_dir = opt.checkpoints_dir
 
         # Define the generator
         self.generator = Generator()
         self.discriminator = Discriminator(ndf=32, img_f=128, layers=4)
 
         # Initialize loss functions and optimizers if training
-        if self.isTrain:
-            self.init_losses_and_optimizers(device, lr, ratio_g2d)
+        if opt.isTrain:
+            self.init_losses_and_optimizers(opt.device, lr, ratio_g2d)
 
     def init_weights(self, gain=0.02):
         # Iterate over all modules in the model
@@ -766,7 +766,7 @@ class Final_Model(nn.Module):
         self.forward()
 
         self.optimizer_D.zero_grad()
-        self.backward_D()
+        self.backward_D(self.input_P2, self.generated_img)
         self.optimizer_D.step()
 
         # Optimize the generator
@@ -833,6 +833,15 @@ class Final_Model(nn.Module):
 
             if not self.is_train:
                 net.eval()
+
+    def get_loss_results(self):
+        return {"D_loss": self.D_loss,
+                "loss_content_gen": self.loss_content_gen,
+                "loss_style_gen": self.loss_style_gen,
+                "loss_adv": self.loss_adv,
+                "L_l1": self.L_l1,
+                "parsing_gen_cross": self.parsing_gen_cross,
+                "parsing_gen_l1": self.parsing_gen_l1}
 
 
 # From resource code -----------------------------------------------------------------------

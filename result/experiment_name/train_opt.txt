@@ -31,8 +31,8 @@ no_html: False
 old_size: (256, 256)
 phase: train
 print_freq: 200
-save_iters_freq: 20000
-save_latest_freq: 20000
+save_iters_freq: 2000
+save_latest_freq: 2000
 scale: False
 serial_batches: False
 shift: False

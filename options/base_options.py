@@ -78,13 +78,12 @@ class BaseOptions():
         if opt.phase != 'val':
             self.print_options(opt)
 
-        opt.device = torch.device("mps")
-        torch.backends.cudnn.benchmark = True
-        # if torch.cuda.is_available():
-        #     opt.device = torch.device("mps")
-        #     torch.backends.cudnn.benchmark = True   # cudnn auto-tuner
-        # else:
-        #     opt.device = torch.device("cpu")
+        if torch.cuda.is_available():
+            opt.device = torch.device('cuda:0')
+        elif torch.backends.mps.is_available():
+            opt.device = torch.device('mps')  # Use MPS on supported Macs
+        else:
+            opt.device = torch.device('cpu')
 
         # set gpu ids
         str_ids = opt.gpu_ids.split(',')
@@ -93,8 +92,8 @@ class BaseOptions():
             id = int(str_id)
             if id >= 0:
                 opt.gpu_ids.append(id)
-        if len(opt.gpu_ids):
-            torch.device('mps')
+        # if len(opt.gpu_ids):
+        #     torch.device('mps')
 
         self.opt = opt
 
