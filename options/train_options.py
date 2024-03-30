@@ -22,6 +22,7 @@ class TrainOptions(BaseOptions):
         parser.add_argument('--save_latest_freq', type=int, default=2000, help='frequency of saving the latest results')
         parser.add_argument('--save_iters_freq', type=int, default=2000, help='frequency of saving checkpoints at the end of epochs')
         parser.add_argument('--no_html', action='store_true', help='do not save intermediate training results')
+        parser.add_argument('--ratio_g2d', type=float, default=0.1, help='learning rate ratio G to D')
 
         self.isTrain = True
 

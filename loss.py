@@ -18,38 +18,44 @@ class Adversarial_Loss(nn.Module):
         labels = labels.expand_as(outputs)
         return self.criterion(outputs, labels)
 
-
+# TODO
 class VGG_Loss(nn.Module):
+    r"""
+    Perceptual loss, VGG-based
+    https://arxiv.org/abs/1603.08155
+    https://github.com/dxyang/StyleTransfer/blob/master/utils.py
     """
-        Perceptual loss based on VGG19 features for content and style representation.
-        References:
-        - https://arxiv.org/abs/1603.08155
-        - https://github.com/dxyang/StyleTransfer/blob/master/utils.py
-    """
-    def __init__(self, weights=None):
+
+    def __init__(self, weights=[1.0, 1.0, 1.0, 1.0, 1.0]):
         super(VGG_Loss, self).__init__()
-        if weights is None:
-            weights = [1.0, 1.0, 1.0, 1.0, 1.0]
-        self.vgg = VGG19()
-        self.criterion = nn.L1Loss()
+        self.add_module('vgg', VGG19())
+        self.criterion = torch.nn.L1Loss()
         self.weights = weights
 
     def compute_gram(self, x):
         b, ch, h, w = x.size()
         f = x.view(b, ch, w * h)
-        G = torch.bmm(f, f.transpose(1, 2)) / (h * w * ch)
+        f_T = f.transpose(1, 2)
+        G = f.bmm(f_T) / (h * w * ch)
         return G
 
-    def forward(self, x, y):
-        # Extract features
+    def __call__(self, x, y):
+        # Compute features
         x_vgg, y_vgg = self.vgg(x), self.vgg(y)
 
-        # Compute content loss
-        content_loss = sum(self.weights[i] * self.criterion(x_vgg[f'relu{i+1}_1'], y_vgg[f'relu{i+1}_1']) for i in range(5))
+        content_loss = 0.0
+        content_loss += self.weights[0] * self.criterion(x_vgg['relu1_1'], y_vgg['relu1_1'])
+        content_loss += self.weights[1] * self.criterion(x_vgg['relu2_1'], y_vgg['relu2_1'])
+        content_loss += self.weights[2] * self.criterion(x_vgg['relu3_1'], y_vgg['relu3_1'])
+        content_loss += self.weights[3] * self.criterion(x_vgg['relu4_1'], y_vgg['relu4_1'])
+        content_loss += self.weights[4] * self.criterion(x_vgg['relu5_1'], y_vgg['relu5_1'])
 
-        # Compute style loss
-        style_layers = ['relu2_2', 'relu3_4', 'relu4_4', 'relu5_2']
-        style_loss = sum(self.criterion(self.compute_gram(x_vgg[layer]), self.compute_gram(y_vgg[layer])) for layer in style_layers)
+        # Compute loss
+        style_loss = 0.0
+        style_loss += self.criterion(self.compute_gram(x_vgg['relu2_2']), self.compute_gram(y_vgg['relu2_2']))
+        style_loss += self.criterion(self.compute_gram(x_vgg['relu3_4']), self.compute_gram(y_vgg['relu3_4']))
+        style_loss += self.criterion(self.compute_gram(x_vgg['relu4_4']), self.compute_gram(y_vgg['relu4_4']))
+        style_loss += self.criterion(self.compute_gram(x_vgg['relu5_2']), self.compute_gram(y_vgg['relu5_2']))
 
         return content_loss, style_loss
 

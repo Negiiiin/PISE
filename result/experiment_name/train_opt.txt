@@ -31,6 +31,7 @@ no_html: False
 old_size: (256, 256)
 phase: train
 print_freq: 200
+ratio_g2d: 0.1
 save_iters_freq: 2000
 save_latest_freq: 2000
 scale: False

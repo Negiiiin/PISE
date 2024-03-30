@@ -1,2 +1,5 @@
 /.idea
 /fashion_data
+vgg19-dcbb9e9d.pth
+result
+__pycache__

@@ -10,6 +10,7 @@ from PIL import Image
 import ntpath
 from torch.nn import init
 import warnings
+from torch.optim import lr_scheduler
 
 from VGG19 import VGG19
 
@@ -60,12 +61,12 @@ class Encoder_Block(nn.Module):
         self.conv2 = self._coord_conv(hidden_channel, conv_out_channel, use_spect, use_coord, **kwargs_fine)
 
         # Sequential model
-        self.model = nn.Sequential(norm_layer(conv_in_channel),
+        self.model = nn.Sequential(norm_layer(conv_in_channel).float(),
                                    activation_layer,
-                                   self.conv1,
-                                   norm_layer(hidden_channel),
+                                   self.conv1.float(),
+                                   norm_layer(hidden_channel).float(),
                                    activation_layer,
-                                   self.conv2)
+                                   self.conv2.float())
 
     def _coord_conv(self, in_channels, out_channels, use_spect, use_coord, **kwargs):
         """
@@ -73,9 +74,10 @@ class Encoder_Block(nn.Module):
         """
         conv_layer = Coord_Conv(in_channels, out_channels, use_spect=use_spect, **kwargs) if use_coord \
                      else nn.Conv2d(in_channels, out_channels, **kwargs)
-        return conv_layer
+        return conv_layer.float()
 
     def forward(self, x):
+        x = x.float()
         return self.model(x)
 
 class Gated_Conv(nn.Module):
@@ -138,7 +140,7 @@ class Gated_Conv(nn.Module):
         return self.batch_norm(gated_feature)
 
 class Vgg_Encoder(torch.nn.Module):
-    def __init__(self, pretrained_path='/content/drive/MyDrive/PISE/vgg19-dcbb9e9d.pth'):
+    def __init__(self, pretrained_path='vgg19-dcbb9e9d.pth'):
         super(Vgg_Encoder, self).__init__()
 
         # Check if the pretrained model path exists
@@ -172,7 +174,7 @@ class Res_Block(nn.Module):
     a learnable shortcut, and various normalization and nonlinearity layers.
     """
     def __init__(self, input_nc, output_nc=None, hidden_nc=None, norm_layer=nn.BatchNorm2d,
-                 activation=nn.LeakyReLU(), learnable_shortcut=False, use_spect=False, shortcut=nn.Identity): # maybe we dont need shortcut option and always use coordConv
+                 activation=nn.LeakyReLU(), learnable_shortcut=False, use_spect=False): # maybe we dont need shortcut option and always use coordConv
         super(Res_Block, self).__init__()
 
         # Default values for hidden and output channels if not specified
@@ -180,7 +182,7 @@ class Res_Block(nn.Module):
         output_nc = output_nc or input_nc
 
         # Determine if a learnable shortcut is needed
-        self.learnable_shortcut = learnable_shortcut or (input_nc != output_nc)
+        self.shortcut = learnable_shortcut or (input_nc != output_nc)
 
         # Convolution parameters
         conv_params = {'kernel_size': 3, 'stride': 1, 'padding': 1}
@@ -188,7 +190,7 @@ class Res_Block(nn.Module):
 
         # Construct the main model path
         layers = [
-            norm_layer(input_nc),
+            norm_layer(input_nc)if norm_layer is not None else nn.Identity(),
             activation,
             Coord_Conv(conv_in_channel=input_nc, conv_out_channel=hidden_nc, use_spect=use_spect, **conv_params),
             norm_layer(hidden_nc) if norm_layer is not None else nn.Identity(),
@@ -198,13 +200,14 @@ class Res_Block(nn.Module):
         self.model = nn.Sequential(*layers)
 
         # Construct the shortcut path
-        self.shortcut = shortcut
-        # can be nn.Sequential(
-             #   Coord_Conv(input_nc, output_nc, use_spect=use_spect, **conv_shortcut_params)
-            #)
+        if self.shortcut:
+            self.shortcut_path = Coord_Conv(conv_in_channel=hidden_nc, conv_out_channel=output_nc, use_spect=use_spect, **conv_params)
 
     def forward(self, x):
-        return self.model(x) + self.shortcut(x)
+        if self.shortcut:
+            return self.model(x) + self.shortcut_path(x)
+        else:
+            return self.model(x)
 
 class Res_Block_Decoder(nn.Module):
     """
@@ -287,9 +290,6 @@ class Decoder_1(nn.Module):
         return x
 
 
-
-
-
 class Decoder_2(nn.Module):
     def __init__(self, output_nc, ngf=64,kernel_size=3, norm_layer=nn.BatchNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=True):
@@ -299,17 +299,15 @@ class Decoder_2(nn.Module):
         kwargs = {'kernel_size': kernel_size, 'padding': 0, 'bias': True}
         self.model = nn.Sequential(
             Res_Block_Decoder(ngf*4, ngf*2, ngf*4, norm_layer, activation, use_spect),
-            Res_Block(ngf*2, ngf*2, ngf*2, norm_layer, activation, False, use_spect, False),
+            Res_Block(ngf*2, ngf*2, ngf*2, norm_layer, activation, False, use_spect),
             Res_Block_Decoder(ngf*2, ngf, ngf*2, norm_layer, activation, use_spect),
-            Res_Block(ngf, ngf, ngf, norm_layer, activation, False, use_spect, False),
-            norm_layer(output_nc),
+            Res_Block(ngf, ngf, ngf, norm_layer, activation, False, use_spect),
+            norm_layer(ngf),
             activation,
             nn.ReflectionPad2d(int((kernel_size - 1) / 2)),
-            Coord_Conv(output_nc, 8, use_spect=use_spect, **kwargs),
+            Coord_Conv(ngf, output_nc, use_spect=use_spect, **kwargs),
             nn.Tanh()
         )
-
-
 
     def forward(self, input):
         return self.model(input)
@@ -320,7 +318,7 @@ class Parsing_Generator(nn.Module):
         Hard Encoder with configurable normalization, activation, and spectral normalization.
         Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
     """
-    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d,
+    def __init__(self, input_nc, generator_filter_num=32, norm_layer=nn.BatchNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=True, kernel_size=3):
         super(Parsing_Generator, self).__init__()
 
@@ -338,14 +336,14 @@ class Parsing_Generator(nn.Module):
             Gated_Conv(generator_filter_num*16, generator_filter_num*16)
         )
 
-        kwargs = {'kernel_size': kernel_size, 'padding':0, 'bias': True}
+        kwargs = {'kernel_size': kernel_size, 'padding': 0, 'bias': True}
 
 
         self.output = nn.Sequential(
-            norm_layer(input_nc),
+            norm_layer(generator_filter_num),
             activation,
             nn.ReflectionPad2d(int((kernel_size - 1) / 2)),
-            Coord_Conv(input_nc, 8, use_spect=use_spect, **kwargs),
+            Coord_Conv(generator_filter_num, 8, use_spect=use_spect, **kwargs),
             nn.Tanh()
         )
 
@@ -472,8 +470,8 @@ class Per_Region_Normalization(nn.Module):
         super(Per_Region_Normalization, self).__init__()
         self.norm = norm_layer(input_channels)
         self.style_length = style_length
-        self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
-        self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)/2)
+        self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)//2)
+        self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)//2)
         self.fc_mu_layers = nn.ModuleList([nn.Linear(style_length, style_length) for _ in range(8)]) # TODO We can use 1D convolutions instead of linear layers as well!
 
     def forward(self, fp, sg, style_codes, mask_codes): #style code is per region encoding output(P(sj)
@@ -503,7 +501,6 @@ class Per_Region_Normalization(nn.Module):
         return out
 
 
-
 # ----------------------------------------------- Discriminator -----------------------------------------------
 
 
@@ -525,7 +522,7 @@ class Res_Block_Encoder(nn.Module):
 
         layers = [
             conv1,
-            activation(),
+            activation,
             conv2,
         ]
 
@@ -582,7 +579,7 @@ class Generator(nn.Module):
             self.per_region_encoding = Per_Region_Encoding(ngf)
 
 
-            self.vgg19 = VGG19()
+            self.vgg19 = Vgg_Encoder()
             # self.getMatrix = GetMatrix(ngf * 4, 1)
 
             # self.phi = nn.Conv2d(in_channels=ngf * 4 + 3, out_channels=ngf * 4, kernel_size=1, stride=1, padding=0)
@@ -606,7 +603,7 @@ class Generator(nn.Module):
         encoder_3 = self.encoder_3(img1)
         codes_vector, exist_vector, img1code = self.per_region_encoding(encoder_3, par1)  # Fi
 
-        parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1))  # parsing utput
+        parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1))  # parsing output
         par2 = parcode
 
         parcode = self.encoder_2(torch.cat((par1, par2, pose2, img1), 1))  # Fp
@@ -624,11 +621,9 @@ class Generator(nn.Module):
         return parcode, loss_reg, par2
 
 
-
 class Final_Model(nn.Module):
-    def __init__(self, opt, lr=1e-4, ratio_g2d=0.1):
+    def __init__(self, opt):
         super(Final_Model, self).__init__()
-        self.optimizers = []
         self.device = opt.device
         self.save_dir = opt.checkpoints_dir
 
@@ -638,7 +633,7 @@ class Final_Model(nn.Module):
 
         # Initialize loss functions and optimizers if training
         if opt.isTrain:
-            self.init_losses_and_optimizers(opt.device, lr, ratio_g2d)
+            self.init_losses_and_optimizers(opt)
 
     def init_weights(self, gain=0.02):
         # Iterate over all modules in the model
@@ -652,29 +647,41 @@ class Final_Model(nn.Module):
                     init.constant_(m.bias.data, 0.0)
             # Initialize weights for Conv and Linear layers using orthogonal initialization
             elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):
-                init.orthogonal_(m.weight.data, gain=gain)
+                init.kaiming_normal_(m.weight.data)
                 if hasattr(m, 'bias') and m.bias is not None:
                     init.constant_(m.bias.data, 0.0)
 
-    def init_losses_and_optimizers(self, device, lr, ratio_g2d):
-        self.GAN_loss = loss.Adversarial_Loss().to(device)
+    def init_losses_and_optimizers(self, opt):
+        self.GAN_loss = loss.Adversarial_Loss().to(self.device)
         self.L1_loss = nn.L1Loss()
-        self.VGG_loss = loss.VGG_Loss().to(device)
+        self.VGG_loss = loss.VGG_Loss().to(self.device)
         self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
 
         # Optimizer for the generator
         self.optimizer_G = torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.generator.parameters()),
-            lr=lr, betas=(0.9, 0.999)
+            lr=opt.lr, betas=(0.9, 0.999)
         )
-        self.optimizers.append(self.optimizer_G)
+        self.scheduler_G = lr_scheduler.LambdaLR(self.optimizer_G, lr_lambda=lambda epoch: max(0, 1.0 - (
+                epoch + 1 + opt.iter_count - opt.niter) / float(opt.niter_decay + 1)))
 
         # Optimizer for the discriminator
         self.optimizer_D = torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.discriminator.parameters()),
-            lr=lr * ratio_g2d, betas=(0.9, 0.999)
+            lr=opt.lr * opt.ratio_g2d, betas=(0.9, 0.999)
         )
-        self.optimizers.append(self.optimizer_D)
+
+        self.scheduler_D = lr_scheduler.LambdaLR(self.optimizer_D, lr_lambda=lambda epoch: max(0, 1.0 - (
+                    epoch + 1 + opt.iter_count - opt.niter) / float(opt.niter_decay + 1)))
+
+    def update_lr(self):
+        """Update learning rate."""
+        self.scheduler_D.step()
+        self.scheduler_G.step()
+
+        lr = self.optimizer_D.param_groups[0]['lr']
+
+        print(f"Current Learning Rate = {lr:.7f}")
 
     def set_input(self, input):
         self.input = input
@@ -695,7 +702,7 @@ class Final_Model(nn.Module):
             self.image_paths.append(path)
 
     def forward(self):
-        self.generated_img, self.loss_reg, self.parsav = self.net_G(self.input_P1, self.input_P2, self.input_BP1, self.input_BP2, self.input_SPL1, self.input_SPL2) #TODO
+        self.generated_img, self.loss_reg, self.parsav = self.generator(self.input_P1, self.input_P2, self.input_BP1, self.input_BP2, self.input_SPL1, self.input_SPL2) #TODO
 
     def backward_D(self, real_input, fake_input, unfreeze_netD=True):
         """Calculate the GAN loss for the discriminator, including handling WGAN-GP if specified."""
@@ -713,12 +720,12 @@ class Final_Model(nn.Module):
         D_fake_loss = self.GAN_loss(D_fake, False)
 
         # Combined discriminator loss
-        D_loss = (D_real_loss + D_fake_loss) * 0.5
+        self.D_loss = (D_real_loss + D_fake_loss) * 0.5
 
         # Backpropagate the discriminator loss
-        D_loss.backward()
+        self.D_loss.backward()
 
-        return D_loss
+        return self.D_loss
 
     def backward_G(self, lambda_regularization=30.0, lambda_rec=5.0, lambda_pl=100.0, lambda_a=2.0, lambda_style=200.0, lambda_content=0.5):
         """Calculate training loss for the generator."""
@@ -727,7 +734,7 @@ class Final_Model(nn.Module):
 
         # Parsing Generator two losses ---------------------------
         label_P2 = self.label_P2.squeeze(1).long()
-        self.parsing_gen_cross = self.parLoss(self.parsav, label_P2)
+        self.parsing_gen_cross = self.cross_entropy_2d_loss(self.parsav, label_P2)
         self.parsing_gen_l1 = self.L1_loss(self.parsav,
                                            self.input_SPL2) * lambda_pl  # l1 distance loss between the generated parsing map and the target parsing map
         total_loss += self.parsing_gen_cross + self.parsing_gen_l1
@@ -742,12 +749,12 @@ class Final_Model(nn.Module):
         total_loss += self.L_l1
 
         # Freeze the discriminator for the generator's backward pass
-        for param in self.net_D.parameters():
+        for param in self.discriminator.parameters():
             param.requires_grad = False
 
         # GAN loss (Adversarial loss)
         D_fake = self.discriminator(self.generated_img) #TODO
-        self.loss_adv = self.GAN_loss(D_fake, True, False) * lambda_a
+        self.loss_adv = self.GAN_loss(D_fake, True) * lambda_a
         total_loss += self.loss_adv
 
         # Perceptual loss (Content and Style)
