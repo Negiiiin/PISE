@@ -4,7 +4,8 @@ import torch
 from util import visualizer
 from options.train_options import TrainOptions
 
-import utils
+from final_model import *
+import basic_blocks
 
 
 if __name__ == '__main__':
@@ -29,7 +30,7 @@ if __name__ == '__main__':
     epoch = 0
 
     visualizer = visualizer.Visualizer(opt)
-    model = utils.Final_Model(opt).to(opt.device)
+    model = Final_Model(opt).to(opt.device)
     model.init_weights()
 
     # training process
@@ -46,7 +47,9 @@ if __name__ == '__main__':
 
             if i % opt.save_iters_freq == 0:
                 print('saving the model of iterations %d at epoch %d' % (i, epoch))
-                model.save_networks(epoch*len(dataset)+i)
+                iter_count = opt.which_iter + (epoch*len(dataset)+i)
+                model.save_networks(iter_count)
+                model.test()
 
             if i % opt.eval_iters_freq == 0:
                 model.eval()

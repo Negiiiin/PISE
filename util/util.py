@@ -14,9 +14,9 @@ from PIL import Image
 # convert a tensor into a numpy array
 def tensor2im(image_tensor, bytes=255.0, need_dec=False, imtype=np.uint8):
     if image_tensor.dim() == 3:
-        image_numpy = image_tensor.cpu().float().numpy()
+        image_numpy = image_tensor.cpu().float().detach().numpy()
     else:
-        image_numpy = image_tensor[0].cpu().float().numpy()
+        image_numpy = image_tensor[0].cpu().float().detach().numpy()
         
     image_numpy = np.transpose(image_numpy, (1, 2, 0))
     if need_dec:

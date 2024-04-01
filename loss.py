@@ -59,7 +59,6 @@ class VGG_Loss(nn.Module):
 
         return content_loss, style_loss
 
-
 class Cross_Entropy_Loss2d(nn.Module):
     def __init__(self, weight=None, ignore_index=255, reduction='mean'):
         super(Cross_Entropy_Loss2d, self).__init__()
