@@ -32,11 +32,11 @@ old_size: (256, 256)
 phase: train
 print_freq: 200
 ratio_g2d: 0.1
-save_iters_freq: 2000
-save_latest_freq: 2000
+save_iters_freq: 200
+save_latest_freq: 200
 scale: False
 serial_batches: False
 shift: False
 structure_nc: 18
-which_iter: latest
+which_iter: 0
 ----------------End----------------

@@ -219,7 +219,7 @@ class Final_Model(nn.Module):
         torch.save(self.generator.cpu().state_dict(), save_path)
         self.generator.to(self.device)
 
-        save_filename = f"{epoch}_generator.pth"
+        save_filename = f"{epoch}_discriminator.pth"
         save_path = os.path.join(self.save_dir, save_filename)
 
         torch.save(self.discriminator.cpu().state_dict(), save_path)
