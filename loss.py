@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from VGG19 import VGG19
-
+import torch.nn.functional as F
 class Adversarial_Loss(nn.Module):
     """
         Least Squares GAN Adversarial loss
@@ -60,12 +60,23 @@ class VGG_Loss(nn.Module):
         return content_loss, style_loss
 
 class Cross_Entropy_Loss2d(nn.Module):
-    def __init__(self, weight=None, ignore_index=255, reduction='mean'):
+    # def __init__(self, weight=None, ignore_index=255, reduction='mean'):
+    #     super(Cross_Entropy_Loss2d, self).__init__()
+    #     self.loss = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction=reduction)
+    #
+    # def forward(self, inputs, targets):
+    #     return self.loss(inputs, targets)
+    def __init__(self, weight=None, ignore_index=255):
         super(Cross_Entropy_Loss2d, self).__init__()
-        self.loss = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction=reduction)
+        self.ignore_index = ignore_index
+        self.loss_function = nn.NLLLoss(weight=weight, reduction='mean', ignore_index=ignore_index)
 
     def forward(self, inputs, targets):
-        return self.loss(inputs, targets)
+        # Applying LogSoftmax to the inputs
+        inputs = F.log_softmax(inputs, dim=1)
+        # Calculating NLL loss
+        loss = self.loss_function(inputs, targets)
+        return loss
 
 
 

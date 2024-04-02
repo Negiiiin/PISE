@@ -4,7 +4,7 @@ import ntpath
 import time
 from . import util
 from . import html
-
+import tensorflow as tf
 
 class Visualizer():
     def __init__(self, opt):
@@ -151,7 +151,17 @@ class Visualizer():
 
         print(message)
         with open(self.eval_log_name, "a") as log_file:
-            log_file.write('%s\n' % message)  
+            log_file.write('%s\n' % message)
+
+
+    def tensorboard_log(self, epoch, i, score, summary_writer):
+        message = '(epoch: %d, iters: %d)' % (epoch, i)
+        for k, v in score.items():
+            message += '%s: %.3f ' % (k, v)
+            # Log metrics to TensorBoard
+            with summary_writer.as_default():
+                tf.summary.scalar(name=k, data=v.detach().cpu(), step=i*(epoch+1))
+        summary_writer.flush()
 
     # save image to the disk
     def save_images(self, webpage, visuals, image_path):

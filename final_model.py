@@ -182,7 +182,7 @@ class Final_Model(nn.Module):
         self.backward_G()
         self.optimizer_G.step()
 
-    def save_results(self, save_data, results_dir="eval_results", data_name='none', data_ext='jpg'):
+    def save_results(self, save_data, iteration, epoch,  results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
         """
             Save the training or testing results to disk.
         """
@@ -190,7 +190,7 @@ class Final_Model(nn.Module):
             print(f'Processing image: {img_path}')
             # Extract the base name without the directory path and extension
             base_name = os.path.splitext(ntpath.basename(img_path))[0]
-            img_name = f"{base_name}_{data_name}_{i}.{data_ext}"
+            img_name = f"{epoch}:{iteration}_{base_name}_{data_name}_{i}.{data_ext}"
 
             # Construct the full path for saving the image
             full_img_path = os.path.join(results_dir, img_name)
@@ -199,15 +199,17 @@ class Final_Model(nn.Module):
             img_numpy = tensor2im(save_data[i])
             save_image(img_numpy, full_img_path)
 
-    def test(self, subset=20):
+    def test(self, iteration, epoch, subset=20):
+        self.generator.eval()
         img_gen, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
             self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :]
         )
-
+        print(img_gen)
+        self.generator.train()
         result = torch.cat([self.input_P1[:subset, :, :, :], img_gen, self.input_P2[:subset, :, :, :]], dim=3)
-        self.save_results(result, data_name='all')
+        self.save_results(result, iteration, epoch, data_name='all')
 
     def save_networks(self, epoch):
         """

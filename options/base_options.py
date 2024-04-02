@@ -24,7 +24,7 @@ class BaseOptions():
 
 
         # input/output sizes
-        parser.add_argument('--batchSize', type=int, default=8, help='input batch size')
+        parser.add_argument('--batchSize', type=int, default=10, help='input batch size')
         parser.add_argument('--old_size', type=int, default=(256,256), help='Scale images to this size. The final image will be cropped to --crop_size.')
         parser.add_argument('--load_size', type=int, default=1024, help='Scale images to this size. The final image will be cropped to --crop_size.')
         parser.add_argument('--structure_nc', type=int, default=18 )

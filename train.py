@@ -7,6 +7,10 @@ from options.train_options import TrainOptions
 from final_model import *
 import basic_blocks
 
+import tensorflow as tf
+
+# Setup TensorBoard writer
+summary_writer = tf.summary.create_file_writer('./logsTensorBoard/')
 
 if __name__ == '__main__':
     max_epochs = 30
@@ -14,11 +18,18 @@ if __name__ == '__main__':
     opt = TrainOptions().parse()
 
     if torch.cuda.is_available():
-        device = torch.device('cuda:0')
+        # Assuming you want to use GPU 0 and 1
+        device_ids = [2, 3]
+        # Specify the primary device for model initialization
+        device = torch.device('cuda:2')
+        # Note: DataParallel will replicate the model on multiple GPUs
+        use_multi_gpu = True
     elif torch.backends.mps.is_available():
         device = torch.device('mps')  # Use MPS on supported Macs
+        use_multi_gpu = False
     else:
         device = torch.device('cpu')
+        use_multi_gpu = False
 
     dataset = Dataset.create_dataloader(opt)
 
@@ -31,6 +42,8 @@ if __name__ == '__main__':
 
     visualizer = visualizer.Visualizer(opt)
     model = Final_Model(opt).to(opt.device)
+    if use_multi_gpu:
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
     model.init_weights()
 
     # training process
@@ -49,12 +62,13 @@ if __name__ == '__main__':
                 print('saving the model of iterations %d at epoch %d' % (i, epoch))
                 iter_count = opt.which_iter + (epoch*len(dataset)+i)
                 model.save_networks(iter_count)
-                model.test()
+                model.test(i, epoch)
 
             if i % opt.eval_iters_freq == 0:
                 model.eval()
                 eval_results = model.get_loss_results()
                 visualizer.print_current_eval(epoch, i, eval_results)
+                visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
                 if opt.display_id > 0:
                     visualizer.plot_current_score(i, eval_results)
 
