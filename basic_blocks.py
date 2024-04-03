@@ -276,6 +276,8 @@ class Decoder_1(nn.Module):
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Decoder_1, self).__init__()
 
+        self.debugger = {}
+
         # Define residual blocks in the decoder
         self.res_blocks = nn.Sequential(
             Res_Block_Decoder(generator_filter_num*16, generator_filter_num*8, generator_filter_num*8, norm_layer=norm_layer, activation=activation, use_spect=use_spect),
@@ -285,16 +287,19 @@ class Decoder_1(nn.Module):
         )
 
 
-    def forward(self, x):
-        x = self.res_blocks(x)
-        return x
+    def forward(self, x, debug=False):
+        out = self.res_blocks(x)
+        if debug:
+            self.debugger["Decoder_1_Out_Input"] = x
+            self.debugger["Decoder_1_Out"] = out
+        return out
 
 class Decoder_2(nn.Module):
     def __init__(self, output_nc, ngf=64,kernel_size=3, norm_layer=nn.BatchNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Decoder_2, self).__init__()
 
-
+        self.debugger = {}
         kwargs = {'kernel_size': kernel_size, 'padding': 0, 'bias': True}
         self.model = nn.Sequential(
             Res_Block_Decoder(ngf*4, ngf*2, ngf*4, norm_layer, activation, use_spect),
@@ -308,8 +313,13 @@ class Decoder_2(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, input):
-        return self.model(input)
+    def forward(self, input, debug=False):
+        out = self.model(input)
+        if debug:
+            self.debugger["Decoder_2_Out_Input"] = input
+            self.debugger["Decoder_2_Out"] = out
+            self.debugger["Decoder_2_Out_Shape"] = out.shape
+        return out
 
 class Encoder_2(nn.Module):
     """
@@ -320,6 +330,7 @@ class Encoder_2(nn.Module):
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Encoder_2, self).__init__()
 
+        self.debugger = {}
         # Define encoder blocks
         self.encoder_blocks = nn.Sequential(
             Encoder_Block(input_nc, generator_filter_num*2, None, norm_layer, activation, use_spect),
@@ -340,11 +351,19 @@ class Encoder_2(nn.Module):
             Gated_Conv(generator_filter_num*4, generator_filter_num*4)
         )
 
-    def forward(self, x):
-        x = self.encoder_blocks(x)
-        x = self.gated_convs(x)
-        x = self.res_blocks(x)
-        return x
+    def forward(self, input, debug=False):
+        encoder_blocks = self.encoder_blocks(input)
+        gated_convs = self.gated_convs(encoder_blocks)
+        res_blocks = self.res_blocks(gated_convs)
+
+        if debug:
+            self.debugger["Encoder_2_Input"] = input
+            self.debugger["Encoder_2_Encoder_Blocks"] = encoder_blocks
+            self.debugger["Encoder_2_Gated_Convs"] = gated_convs
+            self.debugger["Encoder_2_Out"] = res_blocks
+            self.debugger["Encoder_2_Out_Shape"] = res_blocks.shape
+
+        return res_blocks
 
 class Encoder_3(nn.Module):
     """
@@ -355,6 +374,7 @@ class Encoder_3(nn.Module):
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Encoder_3, self).__init__()
 
+        self.debugger = {}
         # Define encoder blocks
         self.encoder_blocks = nn.Sequential(
             Encoder_Block(input_nc, generator_filter_num*2, None, norm_layer, activation, use_spect),
@@ -363,9 +383,13 @@ class Encoder_3(nn.Module):
             Encoder_Block(generator_filter_num*4, generator_filter_num*4, None, norm_layer, activation, use_spect)
         )
 
-    def forward(self, x):
-        x = self.encoder_blocks(x)
-        return x
+    def forward(self, x, debug=False):
+        out = self.encoder_blocks(x)
+        if debug:
+            self.debugger["Encoder_3_Out"] = out
+            self.debugger["Encoder_3_Out_Shape"] = out.shape
+            self.debugger["Encoder_3_Out_X"] = x
+        return out
 
 class Per_Region_Encoding(nn.Module):
     """
@@ -375,6 +399,7 @@ class Per_Region_Encoding(nn.Module):
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Per_Region_Encoding, self).__init__()
 
+        self.debugger = {}
         # Define residual blocks in the decoder
         self.blocks = nn.Sequential(
             Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
@@ -388,8 +413,8 @@ class Per_Region_Encoding(nn.Module):
         )
 
 
-    def forward(self,x, segmentation):
-        x = self.blocks(x)
+    def forward(self,input, segmentation, debug=False):
+        x = self.blocks(input)
         segmentation_map = F.interpolate(segmentation, size=x.size()[2:], mode='nearest')
 
         bs, cs, hs, ws = x.shape
@@ -410,6 +435,13 @@ class Per_Region_Encoding(nn.Module):
 
             codes_vector[i][s_size] = feat_mean.squeeze()
 
+        if debug:
+            self.debugger["Per_Region_Encoding_In"] = input
+            self.debugger["Per_Region_Encoding_Out"] = x
+            self.debugger["Per_Region_Encoding_Out_Shape"] = x.shape
+            self.debugger["Per_Region_Encoding_Codes_Vector"] = codes_vector
+            self.debugger["Per_Region_Encoding_Exist_Vector"] = exist_vector
+
         return codes_vector, exist_vector, x
 
 class Per_Region_Normalization(nn.Module):
@@ -420,13 +452,14 @@ class Per_Region_Normalization(nn.Module):
     """
     def __init__(self, input_channels, style_length=256, kernel_size=3,  norm_layer=nn.BatchNorm2d):
         super(Per_Region_Normalization, self).__init__()
+        self.debugger = {}
         self.norm = norm_layer(input_channels)
         self.style_length = style_length
         self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)//2)
         self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)//2)
         self.fc_mu_layers = nn.ModuleList([nn.Linear(style_length, style_length) for _ in range(8)]) # TODO We can use 1D convolutions instead of linear layers as well!
 
-    def forward(self, fp, sg, style_codes, mask_codes): #style code is per region encoding output(P(sj)
+    def forward(self, fp, sg, style_codes, mask_codes, debug=False): #style code is per region encoding output(P(sj)
         """Applies normalization and conditional style modulation to the input features."""
         sg = F.interpolate(sg, size=fp.size()[2:], mode='nearest') # resize sg to match the input feature map
         normalized_features = self.norm(fp)
@@ -450,6 +483,18 @@ class Per_Region_Normalization(nn.Module):
         gamma_avg = self.conv_gamma(middle_avg)
         beta_avg = self.conv_beta(middle_avg)
         out = normalized_features * (1 + gamma_avg) + beta_avg
+
+        if debug:
+            self.debugger["Per_Region_Normalization_fp"] = fp
+            self.debugger["Per_Region_Normalization_Segmentation"] = sg
+            self.debugger["Per_Region_Normalization_Style_Codes"] = style_codes
+            self.debugger["Per_Region_Normalization_Mask_Codes"] = mask_codes
+            self.debugger["Per_Region_Normalization_Middle_Avg"] = middle_avg
+            self.debugger["Per_Region_Normalization_Gamma_Avg"] = gamma_avg
+            self.debugger["Per_Region_Normalization_Beta_Avg"] = beta_avg
+            self.debugger["Per_Region_Normalization_Out"] = out
+            self.debugger["Per_Region_Normalization_Out_Shape"] = out.shape
+
         return out
 
 class Res_Block_Encoder(nn.Module):

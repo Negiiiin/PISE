@@ -24,6 +24,8 @@ class Final_Model(nn.Module):
         self.device = opt.device
         self.save_dir = opt.checkpoints_dir
 
+
+
         # Define the generator
         self.generator = Generator()
         self.discriminator = Discriminator(ndf=32, img_f=128, layers=4)
@@ -204,9 +206,9 @@ class Final_Model(nn.Module):
         img_gen, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
-            self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :]
+            self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :], debug=True
         )
-        print(img_gen)
+        self.generator.save_debug_files("fashion_data/eval_results/logs", epoch, iteration)
         self.generator.train()
         result = torch.cat([self.input_P1[:subset, :, :, :], img_gen, self.input_P2[:subset, :, :, :]], dim=3)
         self.save_results(result, iteration, epoch, data_name='all')
