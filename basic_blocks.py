@@ -47,7 +47,7 @@ class Coord_Conv(nn.Module):
 
 class Encoder_Block(nn.Module):
     def __init__(self, conv_in_channel, conv_out_channel, hidden_channel=None, norm_layer=nn.BatchNorm2d,
-                 activation_layer=nn.LeakyReLU(), use_spect=False, use_coord=False):
+                 activation_layer=nn.LeakyReLU(0.1), use_spect=False, use_coord=False):
         super(Encoder_Block, self).__init__()
 
         # Convolutional layer parameters From code
@@ -56,6 +56,7 @@ class Encoder_Block(nn.Module):
         ############################################
 
         hidden_channel = hidden_channel or conv_out_channel
+
 
         self.conv1 = self._coord_conv(conv_in_channel, hidden_channel, use_spect, use_coord, **kwargs_down)
         self.conv2 = self._coord_conv(hidden_channel, conv_out_channel, use_spect, use_coord, **kwargs_fine)
@@ -78,7 +79,8 @@ class Encoder_Block(nn.Module):
 
     def forward(self, x):
         x = x.float()
-        return self.model(x)
+        x = self.model(x)
+        return x
 
 class Gated_Conv(nn.Module):
     """
@@ -174,7 +176,7 @@ class Res_Block(nn.Module):
     a learnable shortcut, and various normalization and nonlinearity layers.
     """
     def __init__(self, input_nc, output_nc=None, hidden_nc=None, norm_layer=nn.BatchNorm2d,
-                 activation=nn.LeakyReLU(), learnable_shortcut=False, use_spect=False): # maybe we dont need shortcut option and always use coordConv
+                 activation=nn.LeakyReLU(0.1), learnable_shortcut=False, use_spect=False): # maybe we dont need shortcut option and always use coordConv
         super(Res_Block, self).__init__()
 
         # Default values for hidden and output channels if not specified
@@ -215,7 +217,7 @@ class Res_Block_Decoder(nn.Module):
         and non-linearity layers. Supports both Conv2d and ConvTranspose2d layers.
     """
     def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d,
-                 activation=nn.LeakyReLU(), use_spect=False):
+                 activation=nn.LeakyReLU(0.1), use_spect=False):
         super(Res_Block_Decoder, self).__init__()
 
         hidden_nc = hidden_nc or input_nc
@@ -263,8 +265,23 @@ class Encoder_1(nn.Module):
             Encoder_Block(generator_filter_num*4, generator_filter_num*8, generator_filter_num*8, norm_layer, activation, use_spect),
             Encoder_Block(generator_filter_num*8, generator_filter_num*16, generator_filter_num*16, norm_layer, activation, use_spect)
         )
+        self.block1 = Encoder_Block(input_nc, generator_filter_num*2, generator_filter_num, norm_layer, activation, use_spect)
+        self.block2 = Encoder_Block(generator_filter_num*2, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect)
+        self.block3 = Encoder_Block(generator_filter_num*4, generator_filter_num*8, generator_filter_num*8, norm_layer, activation, use_spect)
+        self.block4 = Encoder_Block(generator_filter_num*8, generator_filter_num*16, generator_filter_num*16, norm_layer, activation, use_spect)
     def forward(self, x):
-        x = self.encoder_blocks(x)
+        # print("1", x)
+        # x = self.encoder_blocks(x)
+        # print("1", x)
+        x = self.block1(x)
+        print("1", x)
+        x = self.block2(x)
+        print("2", x)
+        x = self.block3(x)
+        print("3", x)
+        x = self.block4(x)
+        print("4", x)
+
         return x
 
 class Decoder_1(nn.Module):
@@ -501,7 +518,7 @@ class Res_Block_Encoder(nn.Module):
     """
     Residual Block for Encoder
     """
-    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d, activation=nn.LeakyReLU(), use_spect=False):
+    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d, activation=nn.LeakyReLU(0.1), use_spect=False):
         super(Res_Block_Encoder, self).__init__()
 
         hidden_nc = hidden_nc or input_nc

@@ -50,6 +50,7 @@ class Final_Model(nn.Module):
                     init.constant_(m.bias.data, 0.0)
             # Initialize weights for Conv and Linear layers using orthogonal initialization
             elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):
+                # init.orthogonal_(m.weight.data, gain=gain)
                 init.kaiming_normal_(m.weight.data)
                 if hasattr(m, 'bias') and m.bias is not None:
                     init.constant_(m.bias.data, 0.0)
@@ -201,14 +202,43 @@ class Final_Model(nn.Module):
             img_numpy = tensor2im(save_data[i])
             save_image(img_numpy, full_img_path)
 
+    def print_gradients(self, model):
+        data = {}
+        for name, parameter in model.named_parameters():
+            if parameter.grad is not None:
+                data[name] = parameter.grad
+                print(f"Gradients of {name}: {parameter.grad}")
+            else:
+                print(f"{name} has no gradients")
+        self.save_dictionary("fashion_data/eval_results/logs/grads.txt", data)
+
+    def save_debug_files(self, path, epoch, iteration):
+        self.save_dictionary(os.path.join(path, f'parsing_generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.parsing_generator.debugger)
+        self.save_dictionary(os.path.join(path, f'encoder_3_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.encoder_3.debugger)
+        self.save_dictionary(os.path.join(path, f'per_region_encoding_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.per_region_encoding.debugger)
+        self.save_dictionary(os.path.join(path, f'enoder_2_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.encoder_2.debugger)
+        self.save_dictionary(os.path.join(path, f'decoder_2_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.decoder_2.debugger)
+        self.save_dictionary(os.path.join(path, f'per_region_normalization_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.per_region_normalization.debugger)
+        self.save_dictionary(os.path.join(path, f'Generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.debugger)
+
+
+
+    def save_dictionary(self, file_path, my_dict):
+        # Writing the dictionary to a file
+        with open(file_path, 'w') as file:
+            for key, value in my_dict.items():
+                file.write(f'{key}:\n {value}\n-----------------------------------\n')
+
+
     def test(self, iteration, epoch, subset=20):
+        self.print_gradients(self.generator)
         self.generator.eval()
         img_gen, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
             self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :], debug=True
         )
-        self.generator.save_debug_files("fashion_data/eval_results/logs", epoch, iteration)
+        self.save_debug_files(f"fashion_data/eval_results/logs{epoch}:{iteration}", epoch, iteration)
         self.generator.train()
         result = torch.cat([self.input_P1[:subset, :, :, :], img_gen, self.input_P2[:subset, :, :, :]], dim=3)
         self.save_results(result, iteration, epoch, data_name='all')

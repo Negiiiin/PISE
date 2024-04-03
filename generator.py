@@ -149,20 +149,5 @@ class Generator(nn.Module):
         print(self)
         print('The number of parameters: {}'.format(num_params))
 
-    def save_debug_files(self, path, epoch, iteration):
-        self.save_dictionary(os.path.join(path, f'parsing_generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.parsing_generator.debugger)
-        self.save_dictionary(os.path.join(path, f'encoder_3_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.encoder_3.debugger)
-        self.save_dictionary(os.path.join(path, f'per_region_encoding_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.per_region_encoding.debugger)
-        self.save_dictionary(os.path.join(path, f'enoder_2_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.encoder_2.debugger)
-        self.save_dictionary(os.path.join(path, f'decoder_2_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.decoder_2.debugger)
-        self.save_dictionary(os.path.join(path, f'per_region_normalization_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.per_region_normalization.debugger)
-        self.save_dictionary(os.path.join(path, f'Generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.debugger)
 
-
-
-    def save_dictionary(self, file_path, my_dict):
-        # Writing the dictionary to a file
-        with open(file_path, 'w') as file:
-            for key, value in my_dict.items():
-                file.write(f'{key}:\n {value}\n-----------------------------------\n')
 

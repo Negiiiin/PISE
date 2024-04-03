@@ -12,6 +12,30 @@ import tensorflow as tf
 # Setup TensorBoard writer
 summary_writer = tf.summary.create_file_writer('./logsTensorBoard/')
 
+
+# Function to attach hooks for logging gradients
+def attach_gradient_logging_hooks(model):
+    for name, module in model.named_modules():
+        # Skip if it's the whole model itself and not a layer
+        if name == "":
+            continue
+
+        def hook_fn(module, grad_input, grad_output, prefix=name):
+            # Log gradient information
+            print(f"--- Gradients for layer: {prefix} ---")
+            for i, g in enumerate(grad_input):
+                if g is not None:
+                    print(f"Grad Input {i}: Mean = {g.mean()}, Std = {g.std()}")
+            for i, g in enumerate(grad_output):
+                if g is not None:
+                    print(f"Grad Output {i}: Mean = {g.mean()}, Std = {g.std()}")
+            print("---------------------------------")
+
+        # Register the hook
+        module.register_full_backward_hook(hook_fn)
+
+
+
 if __name__ == '__main__':
     max_epochs = 30
 
@@ -30,7 +54,6 @@ if __name__ == '__main__':
     else:
         device = torch.device('cpu')
         use_multi_gpu = False
-
     dataset = Dataset.create_dataloader(opt)
 
     dataset_size = len(dataset) * opt.batchSize
@@ -45,6 +68,9 @@ if __name__ == '__main__':
     if use_multi_gpu:
         model = torch.nn.DataParallel(model, device_ids=device_ids)
     model.init_weights()
+
+    # Attach hooks to all layers
+    # attach_gradient_logging_hooks(model)
 
     # training process
     while (epoch < max_epochs):

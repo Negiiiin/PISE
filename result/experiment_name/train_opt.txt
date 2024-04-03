@@ -23,7 +23,7 @@ lr: 0.0001
 lr_policy: lambda
 max_dataset_size: 9223372036854775807
 model: rec
-nThreads: 8
+nThreads: 2
 name: experiment_name
 niter: 5000000
 niter_decay: 0

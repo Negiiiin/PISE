@@ -17,7 +17,7 @@ from VGG19 import VGG19
 from basic_blocks import *
 
 class Discriminator(nn.Module):
-    def __init__(self, input_nc=3, ndf=64, img_f=1024, layers=6, norm_layer=None, activation=nn.LeakyReLU(),
+    def __init__(self, input_nc=3, ndf=64, img_f=1024, layers=6, norm_layer=None, activation=nn.LeakyReLU(0.1),
                  use_spect=True):
         super(Discriminator, self).__init__()
         self.layers = layers
