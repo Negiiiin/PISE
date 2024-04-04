@@ -49,11 +49,11 @@ class Final_Model(nn.Module):
                 if hasattr(m, 'bias') and m.bias is not None:
                     init.constant_(m.bias.data, 0.0)
             # Initialize weights for Conv and Linear layers using orthogonal initialization
-            elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):
-                # init.orthogonal_(m.weight.data, gain=gain)
-                init.kaiming_normal_(m.weight.data)
-                if hasattr(m, 'bias') and m.bias is not None:
-                    init.constant_(m.bias.data, 0.0)
+            elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):#todo change
+                init.orthogonal_(m.weight.data, gain=gain)
+                # init.kaiming_normal_(m.weight.data)
+                # if hasattr(m, 'bias') and m.bias is not None:
+                #     init.constant_(m.bias.data, 0.0)
 
     def init_losses_and_optimizers(self, opt):
         self.GAN_loss = loss.Adversarial_Loss().to(self.device)
@@ -132,6 +132,7 @@ class Final_Model(nn.Module):
         return self.D_loss
 
     def backward_G(self, lambda_regularization=30.0, lambda_rec=5.0, lambda_pl=100.0, lambda_a=2.0, lambda_style=200.0, lambda_content=0.5):
+    # def backward_G(self, lambda_regularization=0.3, lambda_rec=0.05, lambda_pl=1.0, lambda_a=0.02, lambda_style=2.0, lambda_content=0.005):
         """Calculate training loss for the generator."""
         # Initialize total loss
         total_loss = 0
@@ -207,9 +208,9 @@ class Final_Model(nn.Module):
         for name, parameter in model.named_parameters():
             if parameter.grad is not None:
                 data[name] = parameter.grad
-                print(f"Gradients of {name}: {parameter.grad}")
-            else:
-                print(f"{name} has no gradients")
+            #     print(f"Gradients of {name}: {parameter.grad}")
+            # else:
+            #     print(f"{name} has no gradients")
         self.save_dictionary("fashion_data/eval_results/logs/grads.txt", data)
 
     def save_debug_files(self, path, epoch, iteration):
