@@ -62,12 +62,12 @@ class Encoder_Block(nn.Module):
         self.conv2 = self._coord_conv(hidden_channel, conv_out_channel, use_spect, use_coord, **kwargs_fine)
 
         # Sequential model
-        self.model = nn.Sequential(norm_layer(conv_in_channel).float(),
+        self.model = nn.Sequential(norm_layer(conv_in_channel),
                                    activation_layer,
-                                   self.conv1.float(),
-                                   norm_layer(hidden_channel).float(),
+                                   self.conv1,
+                                   norm_layer(hidden_channel),
                                    activation_layer,
-                                   self.conv2.float())
+                                   self.conv2)
 
     def _coord_conv(self, in_channels, out_channels, use_spect, use_coord, **kwargs):
         """
@@ -75,10 +75,10 @@ class Encoder_Block(nn.Module):
         """
         conv_layer = Coord_Conv(in_channels, out_channels, use_spect=use_spect, **kwargs) if use_coord \
                      else nn.Conv2d(in_channels, out_channels, **kwargs)
-        return conv_layer.float()
+        return conv_layer
 
     def forward(self, x):
-        x = x.float()
+        x = x
         x = self.model(x)
         return x
 
@@ -179,6 +179,7 @@ class Res_Block(nn.Module):
                  activation=nn.LeakyReLU(0.1), learnable_shortcut=False, use_spect=False): # maybe we dont need shortcut option and always use coordConv
         super(Res_Block, self).__init__()
 
+        self.debugger = {}
         # Default values for hidden and output channels if not specified
         hidden_nc = hidden_nc or input_nc
         output_nc = output_nc or input_nc
@@ -205,11 +206,21 @@ class Res_Block(nn.Module):
         if self.shortcut:
             self.shortcut_path = Coord_Conv(conv_in_channel=hidden_nc, conv_out_channel=output_nc, use_spect=use_spect, **conv_params)
 
-    def forward(self, x):
+    def forward(self, x, debug=False):
+        shortcut = None
+        model = self.model(x)
         if self.shortcut:
-            return self.model(x) + self.shortcut_path(x)
+            shortcut = self.shortcut_path(x)
+            out = model + shortcut
         else:
-            return self.model(x)
+            out = model + x
+        if debug:
+            self.debugger["Res_Block_Input"] = x
+            self.debugger["Res_Block_Output"] = out
+            self.debugger["Res_Block_model"] = model
+            self.debugger["Res_Block_Shortcut"] = shortcut
+        return out
+
 
 class Res_Block_Decoder(nn.Module):
     """
@@ -259,12 +270,12 @@ class Encoder_1(nn.Module):
         super(Encoder_1, self).__init__()
 
         # Define encoder blocks
-        self.encoder_blocks = nn.Sequential(
-            Encoder_Block(input_nc, generator_filter_num*2, generator_filter_num, norm_layer, activation, use_spect),
-            Encoder_Block(generator_filter_num*2, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect),
-            Encoder_Block(generator_filter_num*4, generator_filter_num*8, generator_filter_num*8, norm_layer, activation, use_spect),
-            Encoder_Block(generator_filter_num*8, generator_filter_num*16, generator_filter_num*16, norm_layer, activation, use_spect)
-        )
+        # self.encoder_blocks = nn.Sequential(
+        #     Encoder_Block(input_nc, generator_filter_num*2, generator_filter_num, norm_layer, activation, use_spect),
+        #     Encoder_Block(generator_filter_num*2, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect),
+        #     Encoder_Block(generator_filter_num*4, generator_filter_num*8, generator_filter_num*8, norm_layer, activation, use_spect),
+        #     Encoder_Block(generator_filter_num*8, generator_filter_num*16, generator_filter_num*16, norm_layer, activation, use_spect)
+        # )
         self.block1 = Encoder_Block(input_nc, generator_filter_num*2, generator_filter_num, norm_layer, activation, use_spect)
         self.block2 = Encoder_Block(generator_filter_num*2, generator_filter_num*4, generator_filter_num*4, norm_layer, activation, use_spect)
         self.block3 = Encoder_Block(generator_filter_num*4, generator_filter_num*8, generator_filter_num*8, norm_layer, activation, use_spect)
@@ -274,13 +285,13 @@ class Encoder_1(nn.Module):
         # x = self.encoder_blocks(x)
         # print("1", x)
         x = self.block1(x)
-        print("1", x)
+        # print("1", x)
         x = self.block2(x)
-        print("2", x)
+        # print("2", x)
         x = self.block3(x)
-        print("3", x)
+        # print("3", x)
         x = self.block4(x)
-        print("4", x)
+        # print("4", x)
 
         return x
 
@@ -343,7 +354,7 @@ class Encoder_2(nn.Module):
         Hard Encoder with configurable normalization, activation, and spectral normalization.
         Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
     """
-    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d, shortcut=nn.Identity,
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.InstanceNorm2d, shortcut=nn.Identity,
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Encoder_2, self).__init__()
 
@@ -405,7 +416,7 @@ class Encoder_3(nn.Module):
         if debug:
             self.debugger["Encoder_3_Out"] = out
             self.debugger["Encoder_3_Out_Shape"] = out.shape
-            self.debugger["Encoder_3_Out_X"] = x
+            self.debugger["Encoder_3_Input"] = x
         return out
 
 class Per_Region_Encoding(nn.Module):

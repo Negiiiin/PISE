@@ -24,7 +24,7 @@ class BaseOptions():
 
 
         # input/output sizes
-        parser.add_argument('--batchSize', type=int, default=10, help='input batch size')
+        parser.add_argument('--batchSize', type=int, default=8, help='input batch size')
         parser.add_argument('--old_size', type=int, default=(256,256), help='Scale images to this size. The final image will be cropped to --crop_size.')
         parser.add_argument('--load_size', type=int, default=1024, help='Scale images to this size. The final image will be cropped to --crop_size.')
         parser.add_argument('--structure_nc', type=int, default=18 )
@@ -35,7 +35,7 @@ class BaseOptions():
         parser.add_argument('--dataset_mode', type=str, default='fashion')
         parser.add_argument('--fid_gt_path', type=str)
         parser.add_argument('--serial_batches', action='store_true', help='if true, takes images in order to make batches, otherwise takes them randomly')
-        parser.add_argument('--nThreads', default=2, type=int, help='# threads for loading data')
+        parser.add_argument('--nThreads', default=1, type=int, help='# threads for loading data')
         parser.add_argument('--max_dataset_size', type=int, default=sys.maxsize, help='Maximum number of samples allowed per dataset. If the dataset directory contains more than max_dataset_size, only a subset is loaded.')
 
         # display parameter define

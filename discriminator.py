@@ -22,7 +22,7 @@ class Discriminator(nn.Module):
         super(Discriminator, self).__init__()
         self.layers = layers
         self.activation = activation
-
+        self.debugger = dict()
         self.blocks = [Res_Block_Encoder(input_nc if i == 0 else ndf * min(2 ** (i - 1), img_f // ndf),
                                        ndf * min(2 ** i, img_f // ndf),
                                        ndf * min(2 ** (i - 1), img_f // ndf) if i > 0 else ndf,
@@ -31,7 +31,14 @@ class Discriminator(nn.Module):
         self.blocks = nn.ModuleList(self.blocks)
         self.final_conv = spectral_norm(nn.Conv2d(ndf * min(2 ** (layers - 1), img_f // ndf), 1, 1))
 
-    def forward(self, x):
-        for block in self.blocks:
+    def forward(self, x, debug=False):
+        if debug:
+            self.debugger[f'Input'] = x
+        for index, block in enumerate(self.blocks):
             x = block(x)
-        return self.final_conv(self.activation(x))
+            if debug:
+                self.debugger[f'layer{index}'] = x
+        out = self.final_conv(self.activation(x))
+        if debug:
+            self.debugger[f'Output'] = out
+        return out

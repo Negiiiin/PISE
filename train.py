@@ -97,6 +97,7 @@ if __name__ == '__main__':
                 visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
                 if opt.display_id > 0:
                     visualizer.plot_current_score(i, eval_results)
+                model.train()
 
         """
             # display images on visdom and save images

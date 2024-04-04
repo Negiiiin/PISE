@@ -50,10 +50,10 @@ class Final_Model(nn.Module):
                     init.constant_(m.bias.data, 0.0)
             # Initialize weights for Conv and Linear layers using orthogonal initialization
             elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):#todo change
-                init.orthogonal_(m.weight.data, gain=gain)
-                # init.kaiming_normal_(m.weight.data)
-                # if hasattr(m, 'bias') and m.bias is not None:
-                #     init.constant_(m.bias.data, 0.0)
+                # init.orthogonal_(m.weight.data, gain=gain)
+                init.kaiming_normal_(m.weight.data)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant_(m.bias.data, 0.0)
 
     def init_losses_and_optimizers(self, opt):
         self.GAN_loss = loss.Adversarial_Loss().to(self.device)
@@ -120,7 +120,7 @@ class Final_Model(nn.Module):
         D_real_loss = self.GAN_loss(D_real, True)
 
         # Fake input loss (detach to avoid backproping into the generator)
-        D_fake = self.discriminator(fake_input.detach())
+        D_fake = self.discriminator(fake_input.detach(), True)
         D_fake_loss = self.GAN_loss(D_fake, False)
 
         # Combined discriminator loss
@@ -140,9 +140,12 @@ class Final_Model(nn.Module):
         # Parsing Generator two losses ---------------------------
         label_P2 = self.label_P2.squeeze(1).long()
         self.parsing_gen_cross = self.cross_entropy_2d_loss(self.parsav, label_P2)
+
         self.parsing_gen_l1 = self.L1_loss(self.parsav,
                                            self.input_SPL2) * lambda_pl  # l1 distance loss between the generated parsing map and the target parsing map
+
         total_loss += self.parsing_gen_cross + self.parsing_gen_l1
+
 
         # Image generator losses ---------------------------------
         # Regularization loss
@@ -153,20 +156,29 @@ class Final_Model(nn.Module):
         self.L_l1 = self.L1_loss(self.generated_img, self.input_P2) * lambda_rec # Ll1 - self.generated_img is an output of the generator - TODO
         total_loss += self.L_l1
 
+
+
         # Freeze the discriminator for the generator's backward pass
         for param in self.discriminator.parameters():
             param.requires_grad = False
 
         # GAN loss (Adversarial loss)
-        D_fake = self.discriminator(self.generated_img) #TODO
+        D_fake = self.discriminator(self.generated_img)
         self.loss_adv = self.GAN_loss(D_fake, True) * lambda_a
         total_loss += self.loss_adv
+
+        for param in self.discriminator.parameters():
+            param.requires_grad = True
+
+        total_loss.backward()
+        return
 
         # Perceptual loss (Content and Style)
         self.loss_content_gen, self.loss_style_gen = self.VGG_loss(self.generated_img, self.input_P2) #TODO
         self.loss_style_gen *= lambda_style
         self.loss_content_gen *= lambda_content
         total_loss += self.loss_content_gen + self.loss_style_gen
+
 
         # Backpropagate the total loss
         total_loss.backward()
@@ -185,6 +197,7 @@ class Final_Model(nn.Module):
         self.optimizer_G.zero_grad()
         self.backward_G()
         self.optimizer_G.step()
+        
 
     def save_results(self, save_data, iteration, epoch,  results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
         """
@@ -203,7 +216,7 @@ class Final_Model(nn.Module):
             img_numpy = tensor2im(save_data[i])
             save_image(img_numpy, full_img_path)
 
-    def print_gradients(self, model):
+    def print_gradients(self, model,epoch , iteration):
         data = {}
         for name, parameter in model.named_parameters():
             if parameter.grad is not None:
@@ -211,7 +224,7 @@ class Final_Model(nn.Module):
             #     print(f"Gradients of {name}: {parameter.grad}")
             # else:
             #     print(f"{name} has no gradients")
-        self.save_dictionary("fashion_data/eval_results/logs/grads.txt", data)
+        self.save_dictionary(f"fashion_data/eval_results/logs/grads{epoch}:{iteration}.txt", data)
 
     def save_debug_files(self, path, epoch, iteration):
         self.save_dictionary(os.path.join(path, f'parsing_generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.parsing_generator.debugger)
@@ -221,6 +234,8 @@ class Final_Model(nn.Module):
         self.save_dictionary(os.path.join(path, f'decoder_2_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.decoder_2.debugger)
         self.save_dictionary(os.path.join(path, f'per_region_normalization_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.per_region_normalization.debugger)
         self.save_dictionary(os.path.join(path, f'Generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.debugger)
+        self.save_dictionary(os.path.join(path, f'Discriminator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.discriminator.debugger)
+
 
 
 
@@ -232,14 +247,15 @@ class Final_Model(nn.Module):
 
 
     def test(self, iteration, epoch, subset=20):
-        self.print_gradients(self.generator)
+        torch.set_printoptions(threshold=10_000)
+        self.print_gradients(self.generator, epoch, iteration)
         self.generator.eval()
         img_gen, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
             self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :], debug=True
         )
-        self.save_debug_files(f"fashion_data/eval_results/logs{epoch}:{iteration}", epoch, iteration)
+        self.save_debug_files(f"fashion_data/eval_results/logs", epoch, iteration)
         self.generator.train()
         result = torch.cat([self.input_P1[:subset, :, :, :], img_gen, self.input_P2[:subset, :, :, :]], dim=3)
         self.save_results(result, iteration, epoch, data_name='all')
@@ -288,8 +304,8 @@ class Final_Model(nn.Module):
 
     def get_loss_results(self):
         return {"D_loss": self.D_loss,
-                "loss_content_gen": self.loss_content_gen,
-                "loss_style_gen": self.loss_style_gen,
+                # "loss_content_gen": self.loss_content_gen,
+                # "loss_style_gen": self.loss_style_gen,
                 "loss_adv": self.loss_adv,
                 "L_l1": self.L_l1,
                 "parsing_gen_cross": self.parsing_gen_cross,

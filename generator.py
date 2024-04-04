@@ -22,8 +22,8 @@ class Parsing_Generator(nn.Module):
         Hard Encoder with configurable normalization, activation, and spectral normalization.
         Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
     """
-    def __init__(self, input_nc, generator_filter_num=32, norm_layer=nn.BatchNorm2d,
-                 activation=nn.LeakyReLU(0.1), use_spect=True, kernel_size=3):
+    def __init__(self, input_nc, generator_filter_num=32, norm_layer=nn.InstanceNorm2d,
+                 activation=nn.LeakyReLU(0.2), use_spect=False, kernel_size=3):
         super(Parsing_Generator, self).__init__()
 
         self.debugger = dict()
@@ -31,15 +31,14 @@ class Parsing_Generator(nn.Module):
         self.encoder_1 = Encoder_1(input_nc, generator_filter_num, norm_layer, activation, use_spect)
 
 
-        # Define residual blocks in the decoder
-        self.decoder_1 = Decoder_1(input_nc, generator_filter_num, norm_layer, activation, use_spect)
-
-
         # Define gated convolutions
         self.gated_convs = nn.Sequential(
             Gated_Conv(generator_filter_num*16, generator_filter_num*16),
             Gated_Conv(generator_filter_num*16, generator_filter_num*16)
         )
+
+        # Define residual blocks in the decoder
+        self.decoder_1 = Decoder_1(input_nc, generator_filter_num, norm_layer, activation, use_spect)
 
         kwargs = {'kernel_size': kernel_size, 'padding': 0, 'bias': True}
 
@@ -102,6 +101,9 @@ class Generator(nn.Module):
             self.gamma = nn.Conv2d(self.ngf * 4, 1, kernel_size=1, stride=1, padding=0, bias=False)
             self.beta = nn.Conv2d(self.ngf * 4, 1, kernel_size=1, stride=1, padding=0, bias=False)
 
+            self.res_block = Res_Block(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=nn.InstanceNorm2d)
+
+            self.res_block2 = Res_Block(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=nn.InstanceNorm2d)
             # self.res = ResBlock(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=norm_layer,
             #                     nonlinearity=activation,
             #                     learnable_shortcut=False, use_spect=False, use_coord=False)
@@ -122,14 +124,15 @@ class Generator(nn.Module):
 
 
         parcode = self.per_region_normalization(parcode, par2, codes_vector, exist_vector, debug=debug)  # Fp
-        # parcode = self.res(parcode)
 
+        res = self.res_block(parcode, debug=debug)
+
+        parcode = res
         ## regularization to let transformed code and target image code in the same feature space
 
         img2code = self.vgg19(img2)  # VGG output of original image
         loss_reg = F.mse_loss(img2code, parcode)
 
-        parcode = self.decoder_2(parcode, debug=debug)
 
 
         # -------------
@@ -137,7 +140,7 @@ class Generator(nn.Module):
         img1_vgg = self.vgg19(img1)
 
         parcode1_norm = torch.div(parcode, torch.norm(parcode, 2, 1, keepdim=True) + sys.float_info.epsilon)
-        img1code_norm = torch.div(img1code, torch.norm(img1code, 2, 1, keepdim=True) + sys.float_info.epsilon)
+        img1code_norm = torch.div(img1_vgg, torch.norm(img1_vgg, 2, 1, keepdim=True) + sys.float_info.epsilon)
 
         if use_coord:
             parcode1 = add_coords(parcode1_norm)
@@ -156,12 +159,12 @@ class Generator(nn.Module):
 
 
         parcode = parcode * (1 + imgamma) + imbeta
-        # parcode = self.res1(parcode)
+        res2 = self.res_block2(parcode, debug=debug)
+
 
         # -------------
 
-
-
+        parcode = self.decoder_2(res2, debug=debug)
         if debug:
             self.debugger['generator_img1'] = img1
             self.debugger['generator_img2'] = img2
@@ -185,6 +188,8 @@ class Generator(nn.Module):
             self.debugger['generator_imbeta'] = imbeta
             self.debugger['generator_parcode1'] = parcode1
             self.debugger['generator_img1code1'] = img1code1
+            self.debugger['res2'] = res2
+            self.debugger['res'] = res
 
 
 
@@ -208,7 +213,7 @@ class Generator(nn.Module):
             return transformed / norm
 
         # Process features
-        theta = _process_feature(fea1, self.match_kernel, self.theta)
+        theta = _process_feature(fea1, self.match_kernel, self.theta) #maybe it bshould be fea2
         phi = _process_feature(fea2, self.match_kernel, self.phi)
 
         # Compute correspondence and apply weight-temperature scaling if needed
