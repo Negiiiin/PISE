@@ -4,8 +4,146 @@ import torch.nn.functional as F
 from model.networks.base_network import BaseNetwork
 import util.util as util
 from model.networks.base_function import *
+import functools
 # from model.networks.external_function import SpectralNorm
 from torch.nn.utils.spectral_norm import spectral_norm as SpectralNorm
+
+
+
+"""
+Copyright (C) 2019 NVIDIA Corporation.  All rights reserved.
+Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
+"""
+
+import torch.nn as nn
+from torch.nn import init
+
+def get_nonlinearity_layer(activation_type='PReLU'):
+    """Get the activation layer for the networks"""
+    if activation_type == 'ReLU':
+        nonlinearity_layer = nn.ReLU()
+    elif activation_type == 'SELU':
+        nonlinearity_layer = nn.SELU()
+    elif activation_type == 'LeakyReLU':
+        nonlinearity_layer = nn.LeakyReLU(0.1)
+    elif activation_type == 'PReLU':
+        nonlinearity_layer = nn.PReLU()
+    else:
+        raise NotImplementedError('activation layer [%s] is not found' % activation_type)
+    return nonlinearity_layer
+
+
+def get_norm_layer(norm_type='batch'):
+    """Get the normalization layer for the networks"""
+    if norm_type == 'batch':
+        norm_layer = functools.partial(nn.BatchNorm2d, momentum=0.1, affine=True)
+    elif norm_type == 'instance':
+        norm_layer = functools.partial(nn.InstanceNorm2d, affine=True)
+    elif norm_type == 'adain':
+        norm_layer = functools.partial(ADAIN)
+    elif norm_type == 'spade':
+        norm_layer = functools.partial(SPADE, config_text='spadeinstance3x3')        
+    elif norm_type == 'none':
+        norm_layer = None
+    else:
+        raise NotImplementedError('normalization layer [%s] is not found' % norm_type)
+
+    if norm_type != 'none':
+        norm_layer.__name__ = norm_type
+
+    return norm_layer
+
+def spectral_norm(module, use_spect=True):
+    """use spectral normal layer to stable the training process"""
+    if use_spect:
+        return SpectralNorm(module)
+    else:
+        return module
+
+
+class ResBlockEncoder(nn.Module):
+    """
+    Define a decoder block
+    """
+    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d, nonlinearity= nn.LeakyReLU(),
+                 use_spect=False, use_coord=False):
+        super(ResBlockEncoder, self).__init__()
+
+        hidden_nc = input_nc if hidden_nc is None else hidden_nc
+
+        conv1 = spectral_norm(nn.Conv2d(input_nc, hidden_nc, kernel_size=3, stride=1, padding=1), use_spect)
+        conv2 = spectral_norm(nn.Conv2d(hidden_nc, output_nc, kernel_size=4, stride=2, padding=1), use_spect)
+        bypass = spectral_norm(nn.Conv2d(input_nc, output_nc, kernel_size=1, stride=1, padding=0), use_spect)
+
+        if type(norm_layer) == type(None):
+            self.model = nn.Sequential(nonlinearity, conv1, nonlinearity, conv2,)
+        else:
+            self.model = nn.Sequential(norm_layer(input_nc), nonlinearity, conv1, 
+                                       norm_layer(hidden_nc), nonlinearity, conv2,)
+        self.shortcut = nn.Sequential(nn.AvgPool2d(kernel_size=2, stride=2),bypass)
+
+    def forward(self, x):
+        out = self.model(x) + self.shortcut(x)
+        return out     
+
+
+class BaseNetwork(nn.Module):
+    def __init__(self):
+        super(BaseNetwork, self).__init__()
+
+    @staticmethod
+    def modify_commandline_options(parser, is_train):
+        return parser
+
+    def print_network(self):
+        if isinstance(self, list):
+            self = self[0]
+        num_params = 0
+        for param in self.parameters():
+            num_params += param.numel()
+        print('Network [%s] was created. Total number of parameters: %.4f million. '
+              'To see the architecture, do print(network).'
+              % (type(self).__name__, num_params / 1000000))
+        # print(self)
+
+    def init_weights(self, init_type='normal', gain=0.02):
+        def init_func(m):
+            classname = m.__class__.__name__
+            if classname.find('BatchNorm2d') != -1:
+                if hasattr(m, 'weight') and m.weight is not None:
+                    init.normal_(m.weight.data, 1.0, gain)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant_(m.bias.data, 0.0)
+            elif hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
+                if init_type == 'normal':
+                    init.normal_(m.weight.data, 0.0, gain)
+                elif init_type == 'xavier':
+                    init.xavier_normal_(m.weight.data, gain=gain)
+                elif init_type == 'xavier_uniform':
+                    init.xavier_uniform_(m.weight.data, gain=1.0)
+                elif init_type == 'kaiming':
+                    init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+                elif init_type == 'orthogonal':
+                    init.orthogonal_(m.weight.data, gain=gain)
+                elif init_type == 'none':  # uses pytorch's default init method
+                    m.reset_parameters()
+                else:
+                    raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
+                if hasattr(m, 'bias') and m.bias is not None:
+                    init.constant_(m.bias.data, 0.0)
+
+        self.apply(init_func)
+
+        # propagate to children
+        for m in self.children():
+            if hasattr(m, 'init_weights'):
+                m.init_weights(init_type, gain)
+
+
+
+
+
+
 
 class ResDiscriminator(BaseNetwork):
     """
@@ -46,97 +184,5 @@ class ResDiscriminator(BaseNetwork):
         out = self.conv(self.nonlinearity(out))
         return out
 
-
-class PatchDiscriminator(BaseNetwork):
-    """
-    Patch Discriminator Network for Local 70*70 fake/real
-    :param input_nc: number of channels in input
-    :param ndf: base filter channel
-    :param img_f: the largest channel for the model
-    :param layers: down sample layers
-    :param norm: normalization function 'instance, batch, group'
-    :param activation: activation function 'ReLU, SELU, LeakyReLU, PReLU'
-    :param use_spect: use spectral normalization or not
-    :param use_coord: use CoordConv or nor
-    :param use_attn: use short+long attention or not
-    """
-    def __init__(self, input_nc=3, ndf=64, img_f=512, layers=3, norm='batch', activation='LeakyReLU', use_spect=True,
-                 use_coord=False, use_attn=False):
-        super(PatchDiscriminator, self).__init__()
-
-        norm_layer = get_norm_layer(norm_type=norm)
-        nonlinearity = get_nonlinearity_layer(activation_type=activation)
-
-        kwargs = {'kernel_size': 4, 'stride': 2, 'padding': 1, 'bias': False}
-        sequence = [
-            coord_conv(input_nc, ndf, use_spect, use_coord, **kwargs),
-            nonlinearity,
-        ]
-
-        mult = 1
-        for i in range(1, layers):
-            mult_prev = mult
-            mult = min(2 ** i, img_f // ndf)
-            sequence +=[
-                coord_conv(ndf * mult_prev, ndf * mult, use_spect, use_coord, **kwargs),
-                nonlinearity,
-            ]
-
-        mult_prev = mult
-        mult = min(2 ** i, img_f // ndf)
-        kwargs = {'kernel_size': 4, 'stride': 1, 'padding': 1, 'bias': False}
-        sequence += [
-            coord_conv(ndf * mult_prev, ndf * mult, use_spect, use_coord, **kwargs),
-            nonlinearity,
-            coord_conv(ndf * mult, 1, use_spect, use_coord, **kwargs),
-        ]
-
-        self.model = nn.Sequential(*sequence)
-
-    def forward(self, x):
-        out = self.model(x)
-        return out            
-
-class TemporalDiscriminator(BaseNetwork):
-    """
-    Temporal Discriminator Network
-    input_length: number of input image frames
-
-    """
-    def __init__(self, input_nc=3, input_length=6, ndf=64, img_f=1024, layers=6, norm='none', activation='LeakyReLU', use_spect=True,
-                 use_coord=False):
-        super(TemporalDiscriminator, self).__init__()
-
-        self.layers = layers
-        norm_layer = get_norm_layer(norm_type=norm)
-        nonlinearity = get_nonlinearity_layer(activation_type=activation)
-        self.nonlinearity = nonlinearity
-
-        # self.pool = nn.AvgPool3d(kernel_size=(1,2,2), stride=(1,2,2))
-
-        # encoder part
-        self.block0 = ResBlock3DEncoder(input_nc, 1*ndf, 1*ndf, norm_layer, nonlinearity, use_spect, use_coord)
-        self.block1 = ResBlock3DEncoder(1*ndf,    2*ndf, 1*ndf, norm_layer, nonlinearity, use_spect, use_coord)
-
-        feature_len = input_length-4
-        mult = 2*feature_len
-        for i in range(layers - 2):
-            mult_prev = mult
-            mult = min(2 ** (i + 2), img_f//ndf)
-            block = ResBlockEncoder(ndf*mult_prev, ndf*mult, ndf*mult_prev, norm_layer, nonlinearity, use_spect, use_coord)
-            setattr(self, 'encoder' + str(i), block)
-        self.conv = SpectralNorm(nn.Conv2d(ndf*mult, 1, 1))
-
-    def forward(self, x):
-        # [b,l,c,h,w] = x.shape
-        out = self.block0(x)
-        out = self.block1(out)
-        [b,c,l,h,w] = out.shape
-        out = out.view(b,-1,h,w)
-        for i in range(self.layers - 2):
-            model = getattr(self, 'encoder' + str(i))
-            out = model(out)
-        out = self.conv(self.nonlinearity(out))
-        return out
 
 
