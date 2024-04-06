@@ -141,12 +141,12 @@ class Final_Model(nn.Module):
 
         # Parsing Generator two losses ---------------------------
         label_P2 = self.label_P2.squeeze(1).long()
-        self.parsing_gen_cross = self.cross_entropy_2d_loss(self.parsav, label_P2)
-
-        self.parsing_gen_l1 = self.L1_loss(self.parsav,
-                                           self.input_SPL2) * lambda_pl  # l1 distance loss between the generated parsing map and the target parsing map
-
-        total_loss += self.parsing_gen_cross + self.parsing_gen_l1
+        # self.parsing_gen_cross = self.cross_entropy_2d_loss(self.parsav, label_P2)
+        #
+        # self.parsing_gen_l1 = self.L1_loss(self.parsav,
+        #                                    self.input_SPL2) * lambda_pl  # l1 distance loss between the generated parsing map and the target parsing map
+        #
+        # total_loss += self.parsing_gen_cross + self.parsing_gen_l1
 
 
         # Image generator losses ---------------------------------
@@ -342,8 +342,9 @@ class Final_Model(nn.Module):
                 "loss_style_gen": self.loss_style_gen,
                 "loss_adv": self.loss_adv,
                 "L_l1": self.L_l1,
-                "parsing_gen_cross": self.parsing_gen_cross,
-                "parsing_gen_l1": self.parsing_gen_l1}
+                # "parsing_gen_cross": self.parsing_gen_cross,
+                # "parsing_gen_l1": self.parsing_gen_l1
+                }
 
 
 # From resource code -----------------------------------------------------------------------

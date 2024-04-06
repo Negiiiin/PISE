@@ -121,8 +121,8 @@ class Generator(nn.Module):
         encoder_3 = self.encoder_3(img1, debug=debug)
         codes_vector, exist_vector, img1code = self.per_region_encoding(encoder_3, par1, debug=debug)  # Fi
 
-        parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1), debug=debug)  # parsing output
-        par2 = parcode
+        # parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1), debug=debug)  # parsing output
+        # par2 = parcode
 
         parcode = self.encoder_2(torch.cat((par1, par2, pose2, img1), 1), debug=debug)  # Fp
 
