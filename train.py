@@ -45,7 +45,7 @@ if __name__ == '__main__':
         # Assuming you want to use GPU 0 and 1
         device_ids = [2, 3]
         # Specify the primary device for model initialization
-        device = torch.device('cuda:2')
+        device = torch.device('cuda:0')
         # Note: DataParallel will replicate the model on multiple GPUs
         use_multi_gpu = True
     elif torch.backends.mps.is_available():
@@ -65,8 +65,8 @@ if __name__ == '__main__':
 
     visualizer = visualizer.Visualizer(opt)
     model = Final_Model(opt).to(opt.device)
-    if use_multi_gpu:
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
+    # if use_multi_gpu:
+    #     model = torch.nn.DataParallel(model, device_ids=device_ids)
     model.init_weights()
 
     # Attach hooks to all layers

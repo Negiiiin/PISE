@@ -73,8 +73,12 @@ class Encoder_Block(nn.Module):
         """
             Helper function to create a CoordConv or Conv2d layer with optional spectral normalization.
         """
-        conv_layer = Coord_Conv(in_channels, out_channels, use_spect=use_spect, **kwargs) if use_coord \
-                     else nn.Conv2d(in_channels, out_channels, **kwargs)
+        if use_coord:
+            conv_layer = Coord_Conv(in_channels, out_channels, use_spect=use_spect, **kwargs)
+        elif use_spect:
+            conv_layer = spectral_norm(nn.Conv2d(in_channels, out_channels, **kwargs))
+        else:
+            conv_layer = nn.Conv2d(in_channels, out_channels, **kwargs)
         return conv_layer
 
     def forward(self, x):
@@ -210,7 +214,7 @@ class Res_Block(nn.Module):
 
         # Construct the shortcut path
         if self.shortcut:
-            self.shortcut_path = Coord_Conv(conv_in_channel=hidden_nc, conv_out_channel=output_nc, use_spect=use_spect, **conv_params)
+            self.shortcut_path = Coord_Conv(conv_in_channel=hidden_nc, conv_out_channel=output_nc, use_spect=use_spect, **conv_shortcut_params)
 
     def forward(self, x, debug=False):
         shortcut = None
@@ -431,6 +435,17 @@ class Encoder_3(nn.Module):
             self.debugger["Encoder_3_Input"] = x
         return out
 
+# TODO
+def calc_mean_std(feat, eps=1e-5):
+    # eps is a small value added to the variance to avoid divide-by-zero.
+    size = feat.size()
+    assert (len(size) == 4)
+    N, C = size[:2]
+    feat_var = feat.view(N, C, -1).var(dim=2) + eps
+    feat_std = feat_var.sqrt().view(N, C, 1, 1)
+    feat_mean = feat.view(N, C, -1).mean(dim=2).view(N, C, 1, 1)
+    return feat_mean, feat_std
+
 class Per_Region_Encoding(nn.Module):
     """
         Per-Region Encoding with configurable normalization, activation, and spectral normalization.
@@ -444,36 +459,40 @@ class Per_Region_Encoding(nn.Module):
         self.blocks = nn.Sequential(
             Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
                               norm_layer=norm_layer, activation=activation, use_spect=use_spect),
+            # Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
+            #                   norm_layer=norm_layer, activation=activation, use_spect=use_spect),
             Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
                               norm_layer=norm_layer, activation=activation, use_spect=use_spect),
-            Res_Block_Decoder(generator_filter_num * 4, generator_filter_num * 4, generator_filter_num * 4,
-                              norm_layer=norm_layer, activation=activation, use_spect=use_spect),
-            nn.Conv2d(256, 256, kernel_size=1, padding=0),
-            nn.Tanh()
         )
+
+        # TODO
+        self.get_code = nn.Sequential(nn.Conv2d(256, 256, kernel_size=1, padding=0), nn.Tanh())
 
 
     def forward(self,input, segmentation, debug=False):
         x = self.blocks(input)
-        segmentation_map = F.interpolate(segmentation, size=x.size()[2:], mode='nearest')
+        codes = self.get_code(x)
 
-        bs, cs, hs, ws = x.shape
+        segmentation_map = F.interpolate(segmentation, size=codes.size()[2:], mode='nearest')
+
+        bs, cs, hs, ws = codes.shape
         s_size = segmentation_map.shape[1]
-        codes_vector = torch.zeros((bs, s_size + 1, cs), dtype=x.dtype, device=x.device)
-        exist_vector = torch.zeros((bs, s_size), dtype=x.dtype, device=x.device)
+        codes_vector = torch.zeros((bs, s_size + 1, cs), dtype=codes.dtype, device=codes.device)
+        exist_vector = torch.zeros((bs, s_size), dtype=codes.dtype, device=codes.device)
         for i in range(bs):
             for j in range(s_size):
                 component_mask_area = torch.sum(segmentation_map.bool()[i, j])
                 if component_mask_area > 0:
-                    codes_component_feature = x[i].masked_select(segmentation_map.bool()[i, j]).reshape(cs,
+                    codes_component_feature = codes[i].masked_select(segmentation_map.bool()[i, j]).reshape(cs,
                                                                                                 component_mask_area).mean(1)
                     codes_vector[i][j] = codes_component_feature
                     exist_vector[i][j] = 1
 
-            feat = x[i].reshape(1, cs, hs, ws)
-            feat_mean = feat.view(1, cs, -1).mean(dim=2).view(1, cs, 1, 1)
+            # feat = x[i].reshape(1, cs, hs, ws)
+            # feat_mean = feat.view(1, cs, -1).mean(dim=2).view(1, cs, 1, 1) TODO
+            tmpmean, tmpstd = calc_mean_std(codes[i].reshape(1, codes[i].shape[0], codes[i].shape[1], codes[i].shape[2]))
 
-            codes_vector[i][s_size] = feat_mean.squeeze()
+            codes_vector[i][s_size] = tmpmean.squeeze()
 
         if debug:
             self.debugger["Per_Region_Encoding_In"] = input

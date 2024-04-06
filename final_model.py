@@ -11,6 +11,7 @@ import ntpath
 from torch.nn import init
 import warnings
 from torch.optim import lr_scheduler
+from discriminator2 import *
 
 from VGG19 import VGG19
 
@@ -30,7 +31,7 @@ class Final_Model(nn.Module):
 
         # Define the generator
         self.generator = Generator()
-        self.discriminator = Discriminator(ndf=32, img_f=128, layers=4)
+        self.discriminator = ResDiscriminator(ndf=32, img_f=128, layers=4)
 
         # Initialize loss functions and optimizers if training
         if opt.isTrain:
@@ -122,7 +123,7 @@ class Final_Model(nn.Module):
         D_real_loss = self.GAN_loss(D_real, True, True)
 
         # Fake input loss (detach to avoid backproping into the generator)
-        D_fake = self.discriminator(fake_input.detach(), True)
+        D_fake = self.discriminator(fake_input.detach())
         D_fake_loss = self.GAN_loss(D_fake, False, True)
 
         # Combined discriminator loss
@@ -180,7 +181,7 @@ class Final_Model(nn.Module):
         self.loss_content_gen, self.loss_style_gen = self.VGG_loss(self.generated_img, self.input_P2) #TODO
         self.loss_style_gen *= lambda_style
         self.loss_content_gen *= lambda_content
-        total_loss += self.loss_content_gen + self.loss_style_gen
+        total_loss += (self.loss_content_gen + self.loss_style_gen)
 
 
         # Backpropagate the total loss
