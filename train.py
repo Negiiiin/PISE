@@ -96,13 +96,14 @@ if __name__ == '__main__':
             #     iter_count = opt.which_iter + (epoch*len(dataset)+i)
             #     model.save_networks(iter_count)
             #     model.test(i, epoch)
-            model.eval()
-            print('saving the model of iterations %d at epoch %d' % (i, epoch))
-            model.test(i, epoch)
-            model.train()
-            model.zero_grad()
+
 
             if i % opt.eval_iters_freq == 0:
+                model.eval()
+                print('saving the model of iterations %d at epoch %d' % (i, epoch))
+                model.test(i, epoch)
+                model.train()
+                model.zero_grad()
                 # model.eval()
                 eval_results = model.get_loss_results()
                 visualizer.print_current_eval(epoch, i, eval_results)

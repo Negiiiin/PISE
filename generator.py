@@ -1,3 +1,5 @@
+import functools
+
 import torch.nn as nn
 import torch
 from torch.nn.utils.spectral_norm import spectral_norm
@@ -11,7 +13,7 @@ import ntpath
 from torch.nn import init
 import warnings
 from torch.optim import lr_scheduler
-
+import matplotlib.pyplot as plt
 from VGG19 import VGG19
 
 from basic_blocks import *
@@ -105,9 +107,10 @@ class Generator(nn.Module):
             self.gamma = nn.Conv2d(self.ngf * 4, 1, kernel_size=1, stride=1, padding=0, bias=False)
             self.beta = nn.Conv2d(self.ngf * 4, 1, kernel_size=1, stride=1, padding=0, bias=False)
 
-            self.res_block = Res_Block(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=nn.InstanceNorm2d)
+            res_norm = functools.partial(nn.InstanceNorm2d, affine=True)
+            self.res_block = Res_Block(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=res_norm)
 
-            self.res_block2 = Res_Block(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=nn.InstanceNorm2d)
+            self.res_block2 = Res_Block(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=res_norm)
             # self.res = ResBlock(ngf * 4, output_nc=ngf * 4, hidden_nc=ngf * 4, norm_layer=norm_layer,
             #                     nonlinearity=activation,
             #                     learnable_shortcut=False, use_spect=False, use_coord=False)
@@ -121,8 +124,14 @@ class Generator(nn.Module):
         encoder_3 = self.encoder_3(img1, debug=debug)
         codes_vector, exist_vector, img1code = self.per_region_encoding(encoder_3, par1, debug=debug)  # Fi
 
+        #TODO if we want or not using parsing
         # parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1), debug=debug)  # parsing output
         # par2 = parcode
+
+
+
+
+
 
         parcode = self.encoder_2(torch.cat((par1, par2, pose2, img1), 1), debug=debug)  # Fp
 

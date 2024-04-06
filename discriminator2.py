@@ -160,7 +160,7 @@ class ResDiscriminator(BaseNetwork):
         super(ResDiscriminator, self).__init__()
 
         self.layers = layers
-
+        self.debugger = dict()
         norm_layer = get_norm_layer(norm_type=norm)
         nonlinearity = get_nonlinearity_layer(activation_type=activation)
         self.nonlinearity = nonlinearity
@@ -176,12 +176,15 @@ class ResDiscriminator(BaseNetwork):
             setattr(self, 'encoder' + str(i), block)
         self.conv = SpectralNorm(nn.Conv2d(ndf*mult, 1, 1))
 
-    def forward(self, x):
+    def forward(self, x, debug=False):
         out = self.block0(x)
         for i in range(self.layers - 1):
             model = getattr(self, 'encoder' + str(i))
             out = model(out)
         out = self.conv(self.nonlinearity(out))
+        if debug:
+            self.debugger['Output'] = out
+            self.debugger['Input'] = x
         return out
 
 

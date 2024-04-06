@@ -12,9 +12,9 @@ from torch.nn import init
 import warnings
 from torch.optim import lr_scheduler
 from discriminator2 import *
-
+import time
 from VGG19 import VGG19
-
+import matplotlib.pyplot as plt
 
 
 
@@ -107,6 +107,9 @@ class Final_Model(nn.Module):
         for i in range(input['P1'].size(0)):  # Assuming 'P1' exists and has a batch dimension
             path = '_'.join([os.path.splitext(input[path_key][i])[0] for path_key in ['P1_path', 'P2_path']])
             self.image_paths.append(path)
+        # showing image par2
+        # Display the image)
+        # plt.imsave('saved_image.png', self.input_SPL2.detach().cpu().numpy()[0, 0, :, :])
 
     def forward(self):
         self.generated_img, self.loss_reg, self.parsav = self.generator(self.input_P1, self.input_P2, self.input_BP1, self.input_BP2, self.input_SPL1, self.input_SPL2) #TODO
@@ -142,6 +145,7 @@ class Final_Model(nn.Module):
 
         # Parsing Generator two losses ---------------------------
         label_P2 = self.label_P2.squeeze(1).long()
+        #TODO comment or uncomment below to use predefined par2!
         # self.parsing_gen_cross = self.cross_entropy_2d_loss(self.parsav, label_P2)
         #
         # self.parsing_gen_l1 = self.L1_loss(self.parsav,
@@ -343,6 +347,7 @@ class Final_Model(nn.Module):
                 "loss_style_gen": self.loss_style_gen,
                 "loss_adv": self.loss_adv,
                 "L_l1": self.L_l1,
+                #TODO
                 # "parsing_gen_cross": self.parsing_gen_cross,
                 # "parsing_gen_l1": self.parsing_gen_l1
                 }
