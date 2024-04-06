@@ -126,7 +126,7 @@ class Gated_Conv(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
-    def forward(self, x):
+    def forward(self, x, debugger=None):
         """
             Forward pass of the gated convolution layer.
             Args:
@@ -138,8 +138,14 @@ class Gated_Conv(nn.Module):
         gating_mask = self.conv_gate(x)
 
         gated_feature = self.activation(feature_response) * self.gate(gating_mask)
+        batch_normed = self.batch_norm(gated_feature)
+        if debugger is not None:
+            debugger['gated_feature_response'] = feature_response
+            debugger['gated_gating_mask'] = gating_mask
+            debugger['gated_gated_feature'] = gated_feature
+            debugger['gated_batch_normed'] = batch_normed
 
-        return self.batch_norm(gated_feature)
+        return batch_normed
 
 class Vgg_Encoder(torch.nn.Module):
     def __init__(self, pretrained_path='vgg19-dcbb9e9d.pth'):
@@ -227,7 +233,7 @@ class Res_Block_Decoder(nn.Module):
         Decoder block with optional spectral normalization and configurable normalization
         and non-linearity layers. Supports both Conv2d and ConvTranspose2d layers.
     """
-    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.BatchNorm2d,
+    def __init__(self, input_nc, output_nc, hidden_nc=None, norm_layer=nn.InstanceNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=False):
         super(Res_Block_Decoder, self).__init__()
 
@@ -242,10 +248,11 @@ class Res_Block_Decoder(nn.Module):
 
         layers = [
             norm_layer(input_nc),
-            conv1,
             activation,
+            conv1,
             norm_layer(hidden_nc),
-            conv2
+            activation,
+            conv2,
         ]
 
         self.model = nn.Sequential(*layers)
@@ -300,8 +307,8 @@ class Decoder_1(nn.Module):
         Hard Encoder with configurable normalization, activation, and spectral normalization.
         Uses EncoderBlocks and ResBlockDecoders for encoding, and Gated Convolutions for feature modulation.
     """
-    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.BatchNorm2d,
-                 activation=nn.LeakyReLU(0.1), use_spect=True):
+    def __init__(self, input_nc, generator_filter_num=64, norm_layer=nn.InstanceNorm2d,
+                 activation=nn.LeakyReLU(0.2), use_spect=True):
         super(Decoder_1, self).__init__()
 
         self.debugger = {}
@@ -323,7 +330,7 @@ class Decoder_1(nn.Module):
         return out
 
 class Decoder_2(nn.Module):
-    def __init__(self, output_nc, ngf=64,kernel_size=3, norm_layer=nn.BatchNorm2d,
+    def __init__(self, output_nc, ngf=64,kernel_size=3, norm_layer=nn.InstanceNorm2d,
                  activation=nn.LeakyReLU(0.1), use_spect=True):
         super(Decoder_2, self).__init__()
 
@@ -381,7 +388,12 @@ class Encoder_2(nn.Module):
 
     def forward(self, input, debug=False):
         encoder_blocks = self.encoder_blocks(input)
-        gated_convs = self.gated_convs(encoder_blocks)
+
+        for gate in self.gated_convs:
+            encoder_blocks = gate(encoder_blocks, self.debugger)
+        # gated_convs = self.gated_convs(encoder_1)
+        gated_convs = encoder_blocks
+        # gated_convs = self.gated_convs(encoder_blocks)
         res_blocks = self.res_blocks(gated_convs)
 
         if debug:

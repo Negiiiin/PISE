@@ -11,7 +11,7 @@ display_id: 0
 display_port: 8096
 display_single_pane_ncols: 0
 display_winsize: 256
-eval_iters_freq: 5
+eval_iters_freq: 1
 fid_gt_path: None
 gan_mode: lsgan
 gpu_ids: 0

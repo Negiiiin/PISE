@@ -14,6 +14,9 @@ from torch.optim import lr_scheduler
 
 from VGG19 import VGG19
 
+
+
+
 from basic_blocks import *
 from generator import *
 from discriminator import *
@@ -23,7 +26,6 @@ class Final_Model(nn.Module):
         super(Final_Model, self).__init__()
         self.device = opt.device
         self.save_dir = opt.checkpoints_dir
-
 
 
         # Define the generator
@@ -50,13 +52,13 @@ class Final_Model(nn.Module):
                     init.constant_(m.bias.data, 0.0)
             # Initialize weights for Conv and Linear layers using orthogonal initialization
             elif hasattr(m, 'weight') and (class_name.find('Conv') != -1 or class_name.find('Linear') != -1):#todo change
-                # init.orthogonal_(m.weight.data, gain=gain)
-                init.kaiming_normal_(m.weight.data)
-                if hasattr(m, 'bias') and m.bias is not None:
-                    init.constant_(m.bias.data, 0.0)
+                init.orthogonal_(m.weight.data, gain=gain)
+                # init.kaiming_normal_(m.weight.data)
+                # if hasattr(m, 'bias') and m.bias is not None:
+                #     init.constant_(m.bias.data, 0.0)
 
     def init_losses_and_optimizers(self, opt):
-        self.GAN_loss = loss.Adversarial_Loss().to(self.device)
+        self.GAN_loss = loss.AdversarialLoss2().to(self.device)
         self.L1_loss = nn.L1Loss()
         self.VGG_loss = loss.VGG_Loss().to(self.device)
         self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
@@ -117,11 +119,11 @@ class Final_Model(nn.Module):
 
         # Real input loss
         D_real = self.discriminator(real_input)
-        D_real_loss = self.GAN_loss(D_real, True)
+        D_real_loss = self.GAN_loss(D_real, True, True)
 
         # Fake input loss (detach to avoid backproping into the generator)
         D_fake = self.discriminator(fake_input.detach(), True)
-        D_fake_loss = self.GAN_loss(D_fake, False)
+        D_fake_loss = self.GAN_loss(D_fake, False, True)
 
         # Combined discriminator loss
         self.D_loss = (D_real_loss + D_fake_loss) * 0.5
@@ -163,15 +165,16 @@ class Final_Model(nn.Module):
             param.requires_grad = False
 
         # GAN loss (Adversarial loss)
+
         D_fake = self.discriminator(self.generated_img)
-        self.loss_adv = self.GAN_loss(D_fake, True) * lambda_a
+        self.loss_adv = self.GAN_loss(D_fake, True, False) * lambda_a
         total_loss += self.loss_adv
 
         for param in self.discriminator.parameters():
             param.requires_grad = True
 
-        total_loss.backward()
-        return
+        # total_loss.backward()
+        # return
 
         # Perceptual loss (Content and Style)
         self.loss_content_gen, self.loss_style_gen = self.VGG_loss(self.generated_img, self.input_P2) #TODO
@@ -216,15 +219,17 @@ class Final_Model(nn.Module):
             img_numpy = tensor2im(save_data[i])
             save_image(img_numpy, full_img_path)
 
-    def print_gradients(self, model,epoch , iteration):
+
+    def print_gradients(self, model,epoch , iteration, modelname='generator'):
         data = {}
         for name, parameter in model.named_parameters():
             if parameter.grad is not None:
                 data[name] = parameter.grad
+
             #     print(f"Gradients of {name}: {parameter.grad}")
             # else:
             #     print(f"{name} has no gradients")
-        self.save_dictionary(f"fashion_data/eval_results/logs/grads{epoch}:{iteration}.txt", data)
+        self.save_dictionary(f"logs/grads{modelname}{epoch}:{iteration}.txt", data)
 
     def save_debug_files(self, path, epoch, iteration):
         self.save_dictionary(os.path.join(path, f'parsing_generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.parsing_generator.debugger)
@@ -236,8 +241,31 @@ class Final_Model(nn.Module):
         self.save_dictionary(os.path.join(path, f'Generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.debugger)
         self.save_dictionary(os.path.join(path, f'Discriminator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.discriminator.debugger)
 
+    import os
+    import shutil
 
+    def clear_or_create_directory(self, dir_path):
+        """
+        Deletes all files and folders inside the given directory recursively,
+        and creates the directory if it does not exist.
 
+        :param dir_path: Path to the directory to clear or create.
+        """
+        # Check if the directory exists
+        if os.path.exists(dir_path):
+            # Delete all files and subdirectories in the directory
+            for filename in os.listdir(dir_path):
+                file_path = os.path.join(dir_path, filename)
+                # Check if it's a file or a directory
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)  # Remove file or link
+        else:
+            # Create the directory if it does not exist
+            os.makedirs(dir_path)
+            print(f"Directory '{dir_path}' was created.")
+
+    # Example usage
+    # clear_or_create_directory('/path/to/your/directory')
 
     def save_dictionary(self, file_path, my_dict):
         # Writing the dictionary to a file
@@ -246,19 +274,25 @@ class Final_Model(nn.Module):
                 file.write(f'{key}:\n {value}\n-----------------------------------\n')
 
 
-    def test(self, iteration, epoch, subset=20):
+    def test(self, iteration, epoch,  subset=20):
         torch.set_printoptions(threshold=10_000)
-        self.print_gradients(self.generator, epoch, iteration)
+        self.print_gradients(self.generator, epoch, iteration, modelname='generator')
+        self.print_gradients(self.discriminator, epoch, iteration, modelname='discriminator')
         self.generator.eval()
         img_gen, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
             self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :], debug=True
         )
-        self.save_debug_files(f"fashion_data/eval_results/logs", epoch, iteration)
+        self.save_debug_files(f"logs", epoch, iteration)
         self.generator.train()
         result = torch.cat([self.input_P1[:subset, :, :, :], img_gen, self.input_P2[:subset, :, :, :]], dim=3)
         self.save_results(result, iteration, epoch, data_name='all')
+
+        # result = torch.cat([self.input_BP1[:subset, :, :, :], self.input_SPL1[:subset, :, :, :]], dim=3)
+        # self.save_results(result, iteration, epoch, data_name='all')
+
+
 
     def save_networks(self, epoch):
         """
@@ -304,8 +338,8 @@ class Final_Model(nn.Module):
 
     def get_loss_results(self):
         return {"D_loss": self.D_loss,
-                # "loss_content_gen": self.loss_content_gen,
-                # "loss_style_gen": self.loss_style_gen,
+                "loss_content_gen": self.loss_content_gen,
+                "loss_style_gen": self.loss_style_gen,
                 "loss_adv": self.loss_adv,
                 "L_l1": self.L_l1,
                 "parsing_gen_cross": self.parsing_gen_cross,

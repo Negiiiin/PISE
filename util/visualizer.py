@@ -161,7 +161,20 @@ class Visualizer():
             # Log metrics to TensorBoard
             with summary_writer.as_default():
                 tf.summary.scalar(name=k, data=v.detach().cpu(), step=i*(epoch+1))
-        summary_writer.flush()
+        # summary_writer.flush()
+
+    def tensorboard_weights_and_grads(self, model, epoch, i, summary_writer, model_name):
+        #
+        for name, param in model.named_parameters():
+
+            with summary_writer.as_default():
+                param1 = param.detach().cpu().numpy()
+                tf.summary.histogram(model_name+"_"+name + '/weights', data=param1, step=i*(epoch+1))
+                if param.grad is None:
+                    continue
+                grad = param.grad.detach().cpu().numpy()
+                tf.summary.histogram(model_name+"_"+name + '/grads', data=grad, step=i*(epoch+1))
+        # summary_writer.flush()
 
     # save image to the disk
     def save_images(self, webpage, visuals, image_path):

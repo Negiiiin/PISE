@@ -54,7 +54,10 @@ class Parsing_Generator(nn.Module):
     def forward(self, x, debug=False):
         encoder_1 = self.encoder_1(x)
 
-        gated_convs = self.gated_convs(encoder_1)
+        for gate in self.gated_convs:
+            encoder_1 = gate(encoder_1, self.debugger)
+        # gated_convs = self.gated_convs(encoder_1)
+        gated_convs = encoder_1
         decoder_1 = self.decoder_1(gated_convs)
         output = self.output(decoder_1)
         # x = (x + 1.) / 2. TODO test
@@ -64,6 +67,7 @@ class Parsing_Generator(nn.Module):
             self.debugger['parsing_generator_gated_convs'] = gated_convs
             self.debugger['parsing_generator_decoder_1'] = decoder_1
             self.debugger['parsing_generator_output'] = output
+
         return output
 
 
@@ -225,17 +229,6 @@ class Generator(nn.Module):
         # Apply softmax to get attention
         att = F.softmax(f.permute(0, 2, 1), dim=-1)
         return att
-
-    def print_network(self):
-        """Print out the network information"""
-        num_params = 0
-        for param in self.parameters():
-            num_params += param.numel()
-        print(self)
-        print('The number of parameters: {}'.format(num_params))
-
-
-
 
 
 def add_coords(x):

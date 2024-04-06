@@ -72,6 +72,9 @@ if __name__ == '__main__':
     # Attach hooks to all layers
     # attach_gradient_logging_hooks(model)
 
+    model.clear_or_create_directory("logs")
+    model.clear_or_create_directory("fashion_data/eval_results")
+
     # training process
     while (epoch < max_epochs):
         epoch_start_time = time.time()
@@ -82,22 +85,33 @@ if __name__ == '__main__':
         for i, data in enumerate(dataset):
             iter_start_time = time.time()
             model.set_input(data)
+            # model.eval()
+            # print('saving the model of iterations %d at epoch %d' % (i, epoch))
+            # model.test(i, epoch)
+            model.train()
             model.optimize_parameters()
 
-            if i % opt.save_iters_freq == 0:
-                print('saving the model of iterations %d at epoch %d' % (i, epoch))
-                iter_count = opt.which_iter + (epoch*len(dataset)+i)
-                model.save_networks(iter_count)
-                model.test(i, epoch)
+            # if i % opt.save_iters_freq == 0:
+            #     print('saving the model of iterations %d at epoch %d' % (i, epoch))
+            #     iter_count = opt.which_iter + (epoch*len(dataset)+i)
+            #     model.save_networks(iter_count)
+            #     model.test(i, epoch)
+            model.eval()
+            print('saving the model of iterations %d at epoch %d' % (i, epoch))
+            model.test(i, epoch)
+            model.train()
+            model.zero_grad()
 
             if i % opt.eval_iters_freq == 0:
-                model.eval()
+                # model.eval()
                 eval_results = model.get_loss_results()
                 visualizer.print_current_eval(epoch, i, eval_results)
                 visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
+                visualizer.tensorboard_weights_and_grads(model.generator, epoch, i, summary_writer, "generator")
+                visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
                 if opt.display_id > 0:
                     visualizer.plot_current_score(i, eval_results)
-                model.train()
+                # model.train()
 
         """
             # display images on visdom and save images
