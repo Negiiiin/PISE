@@ -64,10 +64,10 @@ if __name__ == '__main__':
     epoch = 0
 
     visualizer = visualizer.Visualizer(opt)
-    model = Final_Model(opt).to(opt.device)
+    model = Painet(opt)
     # if use_multi_gpu:
     #     model = torch.nn.DataParallel(model, device_ids=device_ids)
-    model.init_weights()
+    # model.init_weights()
 
     # Attach hooks to all layers
     # attach_gradient_logging_hooks(model)
@@ -85,10 +85,11 @@ if __name__ == '__main__':
         for i, data in enumerate(dataset):
             iter_start_time = time.time()
             model.set_input(data)
+
             # model.eval()
             # print('saving the model of iterations %d at epoch %d' % (i, epoch))
             # model.test(i, epoch)
-            model.train()
+            # model.train()
             model.optimize_parameters()
 
             # if i % opt.save_iters_freq == 0:
@@ -96,22 +97,30 @@ if __name__ == '__main__':
             #     iter_count = opt.which_iter + (epoch*len(dataset)+i)
             #     model.save_networks(iter_count)
             #     model.test(i, epoch)
-            model.eval()
-            print('saving the model of iterations %d at epoch %d' % (i, epoch))
-            model.test(i, epoch)
-            model.train()
-            model.zero_grad()
+
 
             if i % opt.eval_iters_freq == 0:
+                for param in model.generator.parameters():
+                    param.requires_grad = False
+                for param in model.discriminator.parameters():
+                    param.requires_grad = False
+                print('saving the model of iterations %d at epoch %d' % (i, epoch))
+                model.test2(i, epoch)
+                # model.train()
                 # model.eval()
                 eval_results = model.get_loss_results()
                 visualizer.print_current_eval(epoch, i, eval_results)
                 visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
-                visualizer.tensorboard_weights_and_grads(model.generator, epoch, i, summary_writer, "generator")
-                visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
+                # visualizer.tensorboard_weights_and_grads(model.generator, epoch, i, summary_writer, "generator")
+                # visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
                 if opt.display_id > 0:
                     visualizer.plot_current_score(i, eval_results)
+                # model.zero_grad()
                 # model.train()
+                for param in model.generator.parameters():
+                    param.requires_grad = True
+                for param in model.discriminator.parameters():
+                    param.requires_grad = True
 
         """
             # display images on visdom and save images

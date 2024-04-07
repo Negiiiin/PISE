@@ -45,6 +45,27 @@ class BaseOptions():
         parser.add_argument('--display_single_pane_ncols', type=int, default=0, help='if positive, display all images in a single visidom web panel')
         parser.add_argument('--display_env', type=str, default=parser.parse_known_args()[0].name.replace('_',''), help='the environment of visidom display')
 
+        parser.add_argument('--netG', type=str, default='pose', help='The name of net Generator')
+        parser.add_argument('--netD', type=str, default='res', help='The name of net Discriminator')
+        parser.add_argument('--init_type', type=str, default='orthogonal', help='Initial type')
+
+        # if is_train:
+        # parser.add_argument('--ratio_g2d', type=float, default=0.1, help='learning rate ratio G to D')
+        parser.add_argument('--lambda_rec', type=float, default=5.0, help='weight for image reconstruction loss')
+        parser.add_argument('--lambda_g', type=float, default=2.0, help='weight for generation loss')
+        #parser.add_argument('--lambda_correct', type=float, default=5.0, help='weight for the Sampling Correctness loss')
+        parser.add_argument('--lambda_style', type=float, default=200.0, help='weight for the VGG19 style loss')
+        parser.add_argument('--lambda_content', type=float, default=0.5, help='weight for the VGG19 content loss')
+        parser.add_argument('--lambda_regularization', type=float, default=30.0, help='weight for the affine regularization loss')
+
+        parser.add_argument('--use_spect_g', action='store_false', help="whether use spectral normalization in generator")
+        parser.add_argument('--use_spect_d', action='store_false', help="whether use spectral normalization in discriminator")
+        parser.add_argument('--save_input', action='store_false', help="whether save the input images when testing")
+
+        parser.set_defaults(use_spect_g=False)
+        parser.set_defaults(use_spect_d=True)
+        parser.set_defaults(save_input=False)
+
         return parser
 
     def gather_options(self):

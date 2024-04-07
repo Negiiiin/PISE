@@ -11,13 +11,19 @@ display_id: 0
 display_port: 8096
 display_single_pane_ncols: 0
 display_winsize: 256
-eval_iters_freq: 1
+eval_iters_freq: 10
 fid_gt_path: None
 gan_mode: lsgan
 gpu_ids: 0
 image_nc: 3
+init_type: orthogonal
 isTrain: True
 iter_count: 1
+lambda_content: 0.5
+lambda_g: 2.0
+lambda_rec: 5.0
+lambda_regularization: 30.0
+lambda_style: 200.0
 load_size: 256
 lr: 0.0001
 lr_policy: lambda
@@ -25,6 +31,8 @@ max_dataset_size: 9223372036854775807
 model: rec
 nThreads: 1
 name: experiment_name
+netD: res
+netG: pose
 niter: 5000000
 niter_decay: 0
 no_html: False
@@ -32,11 +40,14 @@ old_size: (256, 256)
 phase: train
 print_freq: 200
 ratio_g2d: 0.1
+save_input: False
 save_iters_freq: 20
 save_latest_freq: 200
 scale: False
 serial_batches: False
 shift: False
 structure_nc: 18
+use_spect_d: True
+use_spect_g: False
 which_iter: 0
 ----------------End----------------

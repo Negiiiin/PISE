@@ -1,3 +1,5 @@
+import functools
+
 import torch.nn as nn
 import torch
 from torch.nn.utils.spectral_norm import spectral_norm
@@ -121,8 +123,8 @@ class Generator(nn.Module):
         encoder_3 = self.encoder_3(img1, debug=debug)
         codes_vector, exist_vector, img1code = self.per_region_encoding(encoder_3, par1, debug=debug)  # Fi
 
-        # parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1), debug=debug)  # parsing output
-        # par2 = parcode
+        parcode = self.parsing_generator(torch.cat((par1, pose1, pose2), 1), debug=debug)  # parsing output
+        par2 = parcode
 
         parcode = self.encoder_2(torch.cat((par1, par2, pose2, img1), 1), debug=debug)  # Fp
 
@@ -201,34 +203,34 @@ class Generator(nn.Module):
         return parcode, loss_reg, par2
 
     def computecorrespondence(self, fea1, fea2, temperature=0.01, detach_flag=False, WTA_scale_weight=1, alpha=1):
-        batch_size, channel_size = fea2.shape[:2]
+            batch_size, channel_size = fea2.shape[:2]
 
-        # Helper function to process and normalize features
-        def _process_feature(feature, kernel, phi_or_theta):
-            transformed = phi_or_theta(feature)
-            if kernel == 1:
-                transformed = transformed.view(batch_size, channel_size, -1)
-            else:
-                transformed = F.unfold(transformed, kernel_size=kernel, padding=kernel // 2)
+            # Helper function to process and normalize features
+            def _process_feature(feature, kernel, phi_or_theta):
+                transformed = phi_or_theta(feature)
+                if kernel == 1:
+                    transformed = transformed.view(batch_size, channel_size, -1)
+                else:
+                    transformed = F.unfold(transformed, kernel_size=kernel, padding=kernel // 2)
 
-            # Normalize feature
-            transformed -= transformed.mean(dim=1, keepdim=True)
-            norm = torch.norm(transformed, p=2, dim=1, keepdim=True) + torch.finfo(transformed.dtype).eps
-            return transformed / norm
+                # Normalize feature
+                transformed -= transformed.mean(dim=1, keepdim=True)
+                norm = torch.norm(transformed, p=2, dim=1, keepdim=True) + torch.finfo(transformed.dtype).eps
+                return transformed / norm
 
-        # Process features
-        theta = _process_feature(fea1, self.match_kernel, self.theta) #maybe it bshould be fea2
-        phi = _process_feature(fea2, self.match_kernel, self.phi)
+            # Process features
+            theta = _process_feature(fea1, self.match_kernel, self.theta) #maybe it bshould be fea2
+            phi = _process_feature(fea2, self.match_kernel, self.phi)
 
-        # Compute correspondence and apply weight-temperature scaling if needed
-        f = torch.matmul(theta.permute(0, 2, 1), phi)
-        if WTA_scale_weight != 1:
-            f = WTA_scale.apply(f, WTA_scale_weight)
-        f /= temperature
+            # Compute correspondence and apply weight-temperature scaling if needed
+            f = torch.matmul(theta.permute(0, 2, 1), phi)
+            if WTA_scale_weight != 1:
+                f = WTA_scale.apply(f, WTA_scale_weight)
+            f /= temperature
 
-        # Apply softmax to get attention
-        att = F.softmax(f.permute(0, 2, 1), dim=-1)
-        return att
+            # Apply softmax to get attention
+            att = F.softmax(f.permute(0, 2, 1), dim=-1)
+            return att
 
 
 def add_coords(x):
@@ -238,6 +240,3 @@ def add_coords(x):
     rr_channel = torch.sqrt(xx_range.pow(2) + yy_range.pow(2))
 
     return torch.cat((x, xx_range, yy_range, rr_channel), dim=1)
-
-
-
