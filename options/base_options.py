@@ -21,6 +21,8 @@ class BaseOptions():
         parser.add_argument('--gpu_ids', type=str, default='0', help='gpu ids: e.g. 0, 1, 2 use -1 for CPU')
         parser.add_argument('--phase', type=str, default='train', help='train, val, test, etc')
         parser.add_argument('--continue_train', action='store_true', help='continue training: load the latest model')
+        parser.add_argument('--gen_path', type=str, default='result/2820_generator.pth', help='continue training: load the latest model')
+        parser.add_argument('--dis_path', type=str, default='result/2820_discriminator.pth', help='continue training: load the latest model')
 
 
         # input/output sizes

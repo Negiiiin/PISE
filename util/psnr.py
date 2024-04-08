@@ -69,7 +69,7 @@ if __name__ == '__main__':
             folder = pg
 
         img1 = os.path.join(folder,name)
-        #os.rename(img1, os.path.join(folder, i))
+        #os.rename(input_image_s, os.path.join(folder, i))
         mse, psnr = _main(img1, img2)
         score_list.append(psnr)
         s_l.append(mse)

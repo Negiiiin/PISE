@@ -5,6 +5,7 @@ checkpoints_dir: ./result
 continue_train: False
 dataroot: ./dataset/fashion_data/
 dataset_mode: fashion
+dis_path: result/2820_discriminator.pth
 display_env: experimentname
 display_freq: 200
 display_id: 0
@@ -14,6 +15,7 @@ display_winsize: 256
 eval_iters_freq: 10
 fid_gt_path: None
 gan_mode: lsgan
+gen_path: result/2820_generator.pth
 gpu_ids: 0
 image_nc: 3
 init_type: orthogonal

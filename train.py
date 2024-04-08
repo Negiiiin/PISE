@@ -42,14 +42,10 @@ if __name__ == '__main__':
     opt = TrainOptions().parse()
 
     if torch.cuda.is_available():
-        # Assuming you want to use GPU 0 and 1
-        device_ids = [2, 3]
-        # Specify the primary device for model initialization
-        device = torch.device('cuda:0')
-        # Note: DataParallel will replicate the model on multiple GPUs
+        device = torch.device('cuda:2')
         use_multi_gpu = True
     elif torch.backends.mps.is_available():
-        device = torch.device('mps')  # Use MPS on supported Macs
+        device = torch.device('mps')
         use_multi_gpu = False
     else:
         device = torch.device('cpu')
@@ -64,10 +60,9 @@ if __name__ == '__main__':
     epoch = 0
 
     visualizer = visualizer.Visualizer(opt)
-    model = Painet(opt)
-    # if use_multi_gpu:
-    #     model = torch.nn.DataParallel(model, device_ids=device_ids)
-    # model.init_weights()
+    model = Final_Model(opt)
+
+    # model.load_networks(opt.gen_path, opt.dis_path)
 
     # Attach hooks to all layers
     # attach_gradient_logging_hooks(model)
@@ -85,19 +80,7 @@ if __name__ == '__main__':
         for i, data in enumerate(dataset):
             iter_start_time = time.time()
             model.set_input(data)
-
-            # model.eval()
-            # print('saving the model of iterations %d at epoch %d' % (i, epoch))
-            # model.test(i, epoch)
-            # model.train()
             model.optimize_parameters()
-
-            # if i % opt.save_iters_freq == 0:
-            #     print('saving the model of iterations %d at epoch %d' % (i, epoch))
-            #     iter_count = opt.which_iter + (epoch*len(dataset)+i)
-            #     model.save_networks(iter_count)
-            #     model.test(i, epoch)
-
 
             if i % opt.eval_iters_freq == 0:
                 for param in model.generator.parameters():
@@ -106,8 +89,7 @@ if __name__ == '__main__':
                     param.requires_grad = False
                 print('saving the model of iterations %d at epoch %d' % (i, epoch))
                 model.test2(i, epoch)
-                # model.train()
-                # model.eval()
+
                 eval_results = model.get_loss_results()
                 visualizer.print_current_eval(epoch, i, eval_results)
                 visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
@@ -115,29 +97,10 @@ if __name__ == '__main__':
                 # visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
                 if opt.display_id > 0:
                     visualizer.plot_current_score(i, eval_results)
-                # model.zero_grad()
-                # model.train()
+
                 for param in model.generator.parameters():
                     param.requires_grad = True
                 for param in model.discriminator.parameters():
                     param.requires_grad = True
-
-        """
-            # display images on visdom and save images
-            if total_iteration % opt.display_freq == 0:
-                visualizer.display_current_results(model.get_current_visuals(), epoch)
-                if hasattr(model, 'distribution'):
-                    visualizer.plot_current_distribution(model.get_current_dis())
-    
-            # print training loss and save logging information to the disk
-            if total_iteration % opt.print_freq == 0:
-                losses = model.get_current_errors()
-                t = (time.time() - iter_start_time) / opt.batchSize
-                visualizer.print_current_errors(epoch, total_iteration, losses, t)
-                if opt.display_id > 0:
-                    visualizer.plot_current_errors(total_iteration, losses)
-        """
-
-        model.update_lr()
 
     print('\nEnd Training')

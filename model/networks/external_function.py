@@ -160,7 +160,7 @@ class PerceptualCorrectness(nn.Module):
 
     def __call__(self, target, source, flow_list, used_layers, mask=None, use_bilinear_sampling=True):
         used_layers=sorted(used_layers, reverse=True)
-        # self.target=target
+        # self.target_image=target_image
         # self.source=source
         self.target_vgg, self.source_vgg = self.vgg(target), self.vgg(source)
         loss = 0
@@ -215,9 +215,9 @@ class PerceptualCorrectness(nn.Module):
         # coor = max_indices[0,32+32*64]
         # coor_y = [int(coor%64), int(coor/64)]
         # source = F.interpolate(self.source, [64,64])
-        # target = F.interpolate(self.target, [64,64])
+        # target_image = F.interpolate(self.target_image, [64,64])
         # source_i = source[0]
-        # target_i = target[0]
+        # target_i = target_image[0]
 
         # source_i = source_i.view(3, -1)
         # source_i[:,coor]=-1
@@ -229,7 +229,7 @@ class PerceptualCorrectness(nn.Module):
         # img_numpy = util.tensor2im(source_i.data)
         # util.save_image(img_numpy, 'source'+lists+'.png')
         # img_numpy = util.tensor2im(target_i.data)
-        # util.save_image(img_numpy, 'target'+lists+'.png')
+        # util.save_image(img_numpy, 'target_image'+lists+'.png')
         return loss
 
     def bilinear_warp(self, source, flow):

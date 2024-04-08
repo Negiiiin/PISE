@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
-from VGG19 import VGG19
+# from VGG19 import VGG19
 import torch.nn.functional as F
-class Adversarial_Loss(nn.Module): #todo this one
+
+class Adversarial_Loss(nn.Module):
     """
         Least Squares GAN Adversarial loss
         Reference: https://arxiv.org/abs/1611.04076
@@ -18,104 +19,46 @@ class Adversarial_Loss(nn.Module): #todo this one
         labels = labels.expand_as(outputs)
         return self.criterion(outputs, labels)
 
-
-class AdversarialLoss2(nn.Module):
-    r"""
-    Adversarial loss
-    https://arxiv.org/abs/1711.10337
-    """
-
-    def __init__(self, type='hinge', target_real_label=1.0, target_fake_label=0.0):
-        r"""
-        type = nsgan | lsgan | hinge
-        """
-        super(AdversarialLoss2, self).__init__()
-
-        self.type = type
-        self.register_buffer('real_label', torch.tensor(target_real_label))
-        self.register_buffer('fake_label', torch.tensor(target_fake_label))
-
-        if type == 'nsgan':
-            self.criterion = nn.BCELoss()
-
-        elif type == 'lsgan':
-            self.criterion = nn.MSELoss()
-
-        elif type == 'hinge':
-            self.criterion = nn.ReLU()
-
-    def __call__(self, outputs, is_real, for_dis=None):
-        if self.type == 'hinge':
-            if for_dis:
-                if is_real:
-                    outputs = -outputs
-                return self.criterion(1 + outputs).mean()
-            else:
-                return (-outputs).mean()
-
-        else:
-            labels = (self.real_label if is_real else self.fake_label).expand_as(outputs)
-            loss = self.criterion(outputs, labels)
-            return loss
-
-
-# TODO
 class VGG_Loss(nn.Module):
-    r"""
-    Perceptual loss, VGG-based
-    https://arxiv.org/abs/1603.08155
-    https://github.com/dxyang/StyleTransfer/blob/master/utils.py
     """
-
-    def __init__(self, weights=[1.0, 1.0, 1.0, 1.0, 1.0]):
+    Defines a VGG-based perceptual loss as described in:
+    https://arxiv.org/abs/1603.08155
+    Uses features from a VGG19 network to compute content and style losses between two images.
+    """
+    def __init__(self, vgg_model, weights=None):
         super(VGG_Loss, self).__init__()
-        self.add_module('vgg', VGG19())
-        self.criterion = torch.nn.L1Loss()
+        if weights is None:
+            weights = [1.0, 1.0, 1.0, 1.0, 1.0]
+        self.vgg = vgg_model
+        self.criterion = nn.L1Loss()
         self.weights = weights
+        self.content_layers = ['relu1_1', 'relu2_1', 'relu3_1', 'relu4_1', 'relu5_1']
+        self.style_layers = ['relu2_2', 'relu3_4', 'relu4_4', 'relu5_2']
 
     def compute_gram(self, x):
         b, ch, h, w = x.size()
-        f = x.view(b, ch, w * h)
-        f_T = f.transpose(1, 2)
-        G = f.bmm(f_T) / (h * w * ch)
-        return G
+        features = x.view(b, ch, h * w)
+        G = torch.mm(features, features.transpose(1, 2))
+        return G.div_(h * w * ch)
 
-    def __call__(self, x, y):
-        # Compute features
+    def forward(self, x, y):
         x_vgg, y_vgg = self.vgg(x), self.vgg(y)
+        content_loss = sum(self.weights[i] * self.criterion(x_vgg[layer], y_vgg[layer])
+                           for i, layer in enumerate(self.content_layers))
 
-        content_loss = 0.0
-        content_loss += self.weights[0] * self.criterion(x_vgg['relu1_1'], y_vgg['relu1_1'])
-        content_loss += self.weights[1] * self.criterion(x_vgg['relu2_1'], y_vgg['relu2_1'])
-        content_loss += self.weights[2] * self.criterion(x_vgg['relu3_1'], y_vgg['relu3_1'])
-        content_loss += self.weights[3] * self.criterion(x_vgg['relu4_1'], y_vgg['relu4_1'])
-        content_loss += self.weights[4] * self.criterion(x_vgg['relu5_1'], y_vgg['relu5_1'])
-
-        # Compute loss
-        style_loss = 0.0
-        style_loss += self.criterion(self.compute_gram(x_vgg['relu2_2']), self.compute_gram(y_vgg['relu2_2']))
-        style_loss += self.criterion(self.compute_gram(x_vgg['relu3_4']), self.compute_gram(y_vgg['relu3_4']))
-        style_loss += self.criterion(self.compute_gram(x_vgg['relu4_4']), self.compute_gram(y_vgg['relu4_4']))
-        style_loss += self.criterion(self.compute_gram(x_vgg['relu5_2']), self.compute_gram(y_vgg['relu5_2']))
+        style_loss = sum(self.criterion(self.compute_gram(x_vgg[layer]), self.compute_gram(y_vgg[layer]))
+                         for layer in self.style_layers)
 
         return content_loss, style_loss
 
 class Cross_Entropy_Loss2d(nn.Module):
-    # def __init__(self, weight=None, ignore_index=255, reduction='mean'):
-    #     super(Cross_Entropy_Loss2d, self).__init__()
-    #     self.loss = nn.CrossEntropyLoss(weight=weight, ignore_index=ignore_index, reduction=reduction)
-    #
-    # def forward(self, inputs, targets):
-    #     return self.loss(inputs, targets)
     def __init__(self, weight=None, ignore_index=255):
         super(Cross_Entropy_Loss2d, self).__init__()
         self.ignore_index = ignore_index
         self.loss_function = nn.NLLLoss(weight=weight, reduction='mean', ignore_index=ignore_index)
 
     def forward(self, inputs, targets):
-        # Applying LogSoftmax to the inputs
         inputs = F.log_softmax(inputs, dim=1)
-        # Calculating NLL loss
         loss = self.loss_function(inputs, targets)
         return loss
 

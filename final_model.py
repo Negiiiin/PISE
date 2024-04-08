@@ -11,14 +11,11 @@ import ntpath
 from torch.nn import init
 import warnings
 from torch.optim import lr_scheduler
-from discriminator2 import *
 from model.networks import external_function
 from VGG19 import VGG19
 import itertools
 import torch
 import torch.nn as nn
-from model.base_model import BaseModel
-from model.networks import base_function, external_function
 import model.networks as network
 from collections import OrderedDict
 
@@ -26,9 +23,9 @@ from collections import OrderedDict
 from basic_blocks import *
 from generator import *
 from discriminator import *
+from eval_metric import *
 
 # From resource code -----------------------------------------------------------------------
-
 def tensor2im(image_tensor, bytes=255.0, need_dec=False, imtype=np.uint8):
     if image_tensor.dim() == 3:
         image_numpy = image_tensor.cpu().float().detach().numpy()
@@ -94,192 +91,12 @@ def save_image(image_numpy, image_path):
     # Save the image
     image = Image.fromarray(image_numpy)
     image.save(image_path)
-
 # From resource code -----------------------------------------------------------------------
 
+# I removed baseModel class
+class Final_Model(nn.Module):
 
-class BaseModel():
-    def __init__(self, opt):
-        self.opt = opt
-        self.gpu_ids = opt.gpu_ids
-        self.isTrain = opt.isTrain
-        self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
-        self.loss_names = []
-        self.model_names = []
-        self.visual_names = []
-        self.value_names = []
-        self.image_paths = []
-        self.optimizers = []
-        self.schedulers = []
-
-    def name(self):
-        return 'BaseModel'
-
-    @staticmethod
-    def modify_options(parser, is_train):
-        """Add new options and rewrite default values for existing options"""
-        return parser
-
-    def set_input(self, input):
-        """Unpack input data from the dataloader and perform necessary pre-processing steps"""
-        pass
-
-    def eval(self):
-        pass
-
-    def setup(self, opt):
-        """Load networks, create schedulers"""
-        if self.isTrain:
-            self.schedulers = [base_function.get_scheduler(optimizer, opt) for optimizer in self.optimizers]
-        if not self.isTrain or opt.continue_train:
-            print('model resumed from %s iteration' % opt.which_iter)
-            self.load_networks(opt.which_iter)
-
-    def set_model_to_train_mode(self):
-        """Make models eval mode during test time"""
-        for name in self.model_names:
-            if isinstance(name, str):
-                net = getattr(self, 'net_' + name)
-                net.train()
-
-    def get_image_paths(self):
-        """Return image paths that are used to load current data"""
-        return self.image_paths
-
-
-
-
-    # save model
-    def save_networks(self, which_epoch):
-        """Save all the networks to the disk"""
-        for name in self.model_names:
-            if isinstance(name, str):
-                save_filename = '%s_net_%s.pth' % (which_epoch, name)
-                save_path = os.path.join(self.save_dir, save_filename)
-                net = getattr(self, 'net_' + name)
-                torch.save(net.cpu().state_dict(), save_path)
-                if len(self.gpu_ids) > 0 and torch.cuda.is_available():
-                    net.cuda()
-
-    # load models
-    def load_networks(self, which_epoch):
-        """Load all the networks from the disk"""
-        for name in self.model_names:
-            if isinstance(name, str):
-                filename = '%s_net_%s.pth' % (which_epoch, name)
-                path = os.path.join(self.save_dir, filename)
-                net = getattr(self, 'net_' + name)
-                try:
-                    net.load_state_dict(torch.load(path))
-                    print('load %s from %s' % (name, filename))
-                except FileNotFoundError:
-                    print('do not find checkpoint for network %s' % name)
-                    continue
-                except:
-                    pretrained_dict = torch.load(path)
-                    model_dict = net.state_dict()
-                    try:
-                        pretrained_dict_ = {k: v for k, v in pretrained_dict.items() if k in model_dict}
-                        if len(pretrained_dict_) == 0:
-                            pretrained_dict_ = {k.replace('module.', ''): v for k, v in pretrained_dict.items() if
-                                                k.replace('module.', '') in model_dict}
-                        if len(pretrained_dict_) == 0:
-                            pretrained_dict_ = {('module.' + k): v for k, v in pretrained_dict.items() if
-                                                'module.' + k in model_dict}
-
-                        pretrained_dict = pretrained_dict_
-                        net.load_state_dict(pretrained_dict)
-                        print('Pretrained network %s has excessive layers; Only loading layers that are used' % name)
-                    except:
-                        print('Pretrained network %s has fewer layers; The following are not initialized:' % name)
-                        not_initialized = set()
-                        for k, v in pretrained_dict.items():
-                            if v.size() == model_dict[k].size():
-                                model_dict[k] = v
-
-                        for k, v in model_dict.items():
-                            if k not in pretrained_dict or v.size() != pretrained_dict[k].size():
-                                # not_initialized.add(k)
-                                not_initialized.add(k.split('.')[0])
-                        print(sorted(not_initialized))
-                        net.load_state_dict(model_dict)
-                if len(self.gpu_ids) > 0 and torch.cuda.is_available():
-                    net.cuda()
-                if not self.isTrain:
-                    net.eval()
-                self.opt.iter_count = util.get_iteration(self.save_dir, filename, name)
-
-                # def save_results(self, save_data, score=None, data_name='none'):
-
-    #     """Save the training or testing results to disk"""
-    #     img_paths = self.get_image_paths()
-
-    #     for i in range(save_data.size(0)):
-    #         print('process image ...... %s' % img_paths[i])
-    #         short_path = ntpath.basename(img_paths[i])  # get image path
-    #         name = os.path.splitext(short_path)[0]
-    #         if type(score) == type(None):
-    #             img_name = '%s_%s.png' % (name, data_name)
-    #         else:
-    #             # d_score = score[i].mean()
-    #             # img_name = '%s_%s_%s.png' % (name, data_name, str(round(d_score.item(), 3)))
-    #             img_name = '%s_%s_%s.png' % (name, data_name, str(score))
-    #         # save predicted image with discriminator score
-    #         util.mkdir(self.opt.results_dir)
-    #         img_path = os.path.join(self.opt.results_dir, img_name)
-    #         # print(os.path.dirname(img_path))
-    #         # util.mkdir(os.path.dirname(img_path))
-    #         img_numpy = util.tensor2im(save_data[i].data)
-    #         util.save_image(img_numpy, img_path)
-
-    def save_results(self, save_data, data_name='none', data_ext='jpg'):
-        """Save the training or testing results to disk"""
-        img_paths = self.get_image_paths()
-
-        for i in range(save_data.size(0)):
-            print('process image ...... %s' % img_paths[i])
-            short_path = ntpath.basename(img_paths[i])  # get image path
-            name = os.path.splitext(short_path)[0]
-            img_name = '%s_%s.%s' % (name, data_name, data_ext)
-
-            util.mkdir(self.opt.results_dir)
-            img_path = os.path.join(self.opt.results_dir, img_name)
-            img_numpy = util.tensor2im(save_data[i].data)
-            util.save_image(img_numpy, img_path)
-
-    def save_feature_map(self, feature_map, save_path, name, add):
-        if feature_map.dim() == 4:
-            feature_map = feature_map[0]
-        name = name[0]
-        feature_map = feature_map.detach().cpu().numpy()
-        for i in range(feature_map.shape[0]):
-            img = feature_map[i, :, :]
-            img = self.motify_outlier(img)
-            name_ = os.path.join(save_path, os.path.splitext(os.path.basename(name))[0],
-                                 add + 'modify' + str(i) + '.png')
-            util.mkdir(os.path.dirname(name_))
-            plt.imsave(name_, img, cmap='viridis')
-
-    def motify_outlier(self, points, thresh=3.5):
-
-        median = np.median(points)
-        diff = np.abs(points - median)
-        med_abs_deviation = np.median(diff)
-
-        modified_z_score = 0.6745 * diff / med_abs_deviation
-
-        outliers = points[modified_z_score > thresh]
-        outliers[outliers > median] = thresh * med_abs_deviation / 0.6745 + median
-        outliers[outliers < median] = -1 * (thresh * med_abs_deviation / 0.6745 + median)
-        points[modified_z_score > thresh] = outliers
-
-        return points
-
-
-class Painet(BaseModel):
-    def name(self):
-        return "parsing and inpaint network"
-
+    # Maybe move this to options?
     @staticmethod
     def modify_options(parser, is_train=True):
         parser.add_argument('--netG', type=str, default='pose', help='The name of net Generator')
@@ -309,47 +126,43 @@ class Painet(BaseModel):
         return parser
 
     def __init__(self, opt):
-        BaseModel.__init__(self, opt)
+        super(Final_Model, self).__init__()
 
+        self.opt = opt
         self.device = 'mps'
 
-
-        # define the generator
         self.generator = Generator().to("mps")
 
         # define the discriminator
-        if self.opt.dataset_mode == 'fashion':
-            self.discriminator = Discriminator(ndf=32, img_f=128, layers=4).to("mps")
+        # if self.opt.dataset_mode == 'fashion':
+        self.discriminator = Discriminator(ndf=32, img_f=128, layers=4).to("mps")
 
+        # define the loss functions
+        self.GAN_loss = loss.Adversarial_Loss().to(self.device)
+        self.L1_loss = torch.nn.L1Loss()
+        self.VGG_loss = external_function.VGGLoss().to(opt.device)
+        self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
 
-        if self.isTrain:
-            # define the loss functions
-            self.GAN_loss = loss.Adversarial_Loss().to(self.device)
-            self.L1_loss = torch.nn.L1Loss()
-            self.VGG_loss = external_function.VGGLoss().to(opt.device)
-            self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
+        # Optimizer for the generator
+        self.optimizer_G = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.generator.parameters()),
+            lr=opt.lr, betas=(0.9, 0.999)
+        )
+        # self.scheduler_G = lr_scheduler.LambdaLR(self.optimizer_G, lr_lambda=lambda epoch: max(0, 1.0 - (
+        #         epoch + 1 + opt.iter_count - opt.niter) / float(opt.niter_decay + 1)))
 
-            # Optimizer for the generator
-            self.optimizer_G = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, self.generator.parameters()),
-                lr=opt.lr, betas=(0.9, 0.999)
-            )
-            # self.scheduler_G = lr_scheduler.LambdaLR(self.optimizer_G, lr_lambda=lambda epoch: max(0, 1.0 - (
-            #         epoch + 1 + opt.iter_count - opt.niter) / float(opt.niter_decay + 1)))
+        # Optimizer for the discriminator
+        self.optimizer_D = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.discriminator.parameters()),
+            lr=opt.lr * opt.ratio_g2d, betas=(0.9, 0.999)
+        )
 
-            # Optimizer for the discriminator
-            self.optimizer_D = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, self.discriminator.parameters()),
-                lr=opt.lr * opt.ratio_g2d, betas=(0.9, 0.999)
-            )
-        # load the pre-trained model and schedulers
-        self.setup(opt)
-
-
-    def save_results(self, save_data, iteration, epoch,  results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
+    def save_results(self, save_data, iteration, epoch, result_psnr, lpips_result, fid_result, results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
         """
             Save the training or testing results to disk.
         """
+        # print("----------------", result_psnr)
+        print(f'Whole batch: PSNR: {result_psnr} - LPIPS: {lpips_result[[0,0,0]]} - FID: {fid_result}')
         for i, img_path in enumerate(self.image_paths):
             print(f'Processing image: {img_path}')
             # Extract the base name without the directory path and extension
@@ -363,6 +176,28 @@ class Painet(BaseModel):
             img_numpy = tensor2im(save_data[i])
             save_image(img_numpy, full_img_path)
 
+    def load_networks(self, generator_path, discriminator_path):
+        """
+            Load all the networks from the disk.
+        """
+        for name, net in zip([generator_path, discriminator_path], [self.generator, self.discriminator]):
+            filename = name
+            path = os.path.join(filename)
+
+            if not os.path.isfile(path):
+                warnings.warn(f"Checkpoint not found for network {name} at {path}", RuntimeWarning)
+                continue
+
+            state_dict = torch.load(path, map_location=self.device)
+            model_dict = net.state_dict()
+
+            # Filter out unnecessary keys
+            state_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.size() == model_dict[k].size()}
+            # Update current model state dict
+            model_dict.update(state_dict)
+            net.load_state_dict(model_dict)
+
+            print(f"Loaded {name} from {filename}")
 
     def print_gradients(self, model,epoch , iteration, modelname='generator'):
         data = {}
@@ -385,9 +220,6 @@ class Painet(BaseModel):
         self.save_dictionary(os.path.join(path, f'Generator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.generator.debugger)
         self.save_dictionary(os.path.join(path, f'Discriminator_debug_epoch_{epoch}_iteration_{iteration}.txt'), self.discriminator.debugger)
 
-    import os
-    import shutil
-
     def clear_or_create_directory(self, dir_path):
         """
         Deletes all files and folders inside the given directory recursively,
@@ -408,15 +240,11 @@ class Painet(BaseModel):
             os.makedirs(dir_path)
             print(f"Directory '{dir_path}' was created.")
 
-    # Example usage
-    # clear_or_create_directory('/path/to/your/directory')
-
     def save_dictionary(self, file_path, my_dict):
         # Writing the dictionary to a file
         with open(file_path, 'w') as file:
             for key, value in my_dict.items():
                 file.write(f'{key}:\n {value}\n-----------------------------------\n')
-
 
     def test2(self, iteration, epoch,  subset=20):
         torch.set_printoptions(threshold=10_000)
@@ -430,7 +258,11 @@ class Painet(BaseModel):
         # self.save_debug_files(f"logs", epoch, iteration)
         # self.generator.train()
         result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
-        self.save_results(result, iteration, epoch, data_name='all')
+        result_psnr = psnr(self.input_P2[:subset, :, :, :], generated_img)
+        lpips_result = calc_lpips(self.input_P2[:subset, :, :, :], generated_img, self.opt)
+        print(generated_img.shape)
+        fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
+        self.save_results(result, iteration, epoch, result_psnr, lpips_result, fid_result, data_name='all')
 
 
         # result = torch.cat([self.input_BP1[:subset, :, :, :], self.input_SPL1[:subset, :, :, :]], dim=3)
@@ -454,10 +286,6 @@ class Painet(BaseModel):
             path = '_'.join([os.path.splitext(input[path_key][i])[0] for path_key in ['P1_path', 'P2_path']])
             self.image_paths.append(path)
 
-
-
-
-
     def get_loss_results(self):
         return {"D_loss": self.D_loss,
                 "loss_content_gen": self.loss_content_gen,
@@ -467,35 +295,11 @@ class Painet(BaseModel):
                 "parsing_gen_cross": self.parsing_gen_cross,
                 "parsing_gen_l1": self.parsing_gen_l1
                 }
+
     def forward(self):
         """Run forward processing to get the inputs"""
         self.generated_img, self.loss_reg, self.parsav = self.generator(self.input_P1, self.input_P2, self.input_BP1,
                                                               self.input_BP2, self.input_SPL1, self.input_SPL2)
-
-    def backward_D_basic(self, netD, real, fake):
-        """Calculate GAN loss for the discriminator"""
-        # Real
-        D_real = netD(real)
-        D_real_loss = self.GAN_loss(D_real, True, True)
-        # fake
-        D_fake = netD(fake.detach())
-        D_fake_loss = self.GAN_loss(D_fake, False, True)
-        # loss for discriminator
-        D_loss = (D_real_loss + D_fake_loss) * 0.5
-        # gradient penalty for wgan-gp
-        if self.opt.gan_mode == 'wgangp':
-            gradient_penalty, gradients = external_function.cal_gradient_penalty(netD, real, fake.detach())
-            D_loss += gradient_penalty
-
-        D_loss.backward()
-
-        return D_loss
-
-    def backward_D2(self):
-        """Calculate the GAN loss for the discriminators"""
-        base_function._unfreeze(self.discriminator)
-        # print(self.input_P2.shape, self.generated_img.shape)
-        self.D_loss = self.backward_D_basic(self.discriminator, self.input_P2, self.generated_img)
 
     def backward_D(self, real_input, fake_input, unfreeze_netD=True):
         """Calculate the GAN loss for the discriminator, including handling WGAN-GP if specified."""
@@ -529,18 +333,18 @@ class Painet(BaseModel):
         self.parsing_gen_cross = self.cross_entropy_2d_loss(self.parsav, label_P2)
 
         self.parsing_gen_l1 = self.L1_loss(self.parsav,
-                                           self.input_SPL2) * 100  # l1 distance loss between the generated parsing map and the target parsing map
+                                           self.input_SPL2) * 100  # l1 distance loss between the generated parsing map and the target_image parsing map
 
         total_loss += self.parsing_gen_cross + self.parsing_gen_l1
 
 
         # Image generator losses ---------------------------------
         # Regularization loss
-        self.L_cor = self.loss_reg * self.opt.lambda_regularization # self.loss_reg is an output of the generator - Lcor TODO
+        self.L_cor = self.loss_reg * self.opt.lambda_regularization # self.loss_reg is an output of the generator - Lcor
         total_loss += self.L_cor
 
         # L1 loss (Appearance loss)
-        self.L_l1 = self.L1_loss(self.generated_img, self.input_P2) * self.opt.lambda_rec # Ll1 - self.generated_img is an output of the generator - TODO
+        self.L_l1 = self.L1_loss(self.generated_img, self.input_P2) * self.opt.lambda_rec # Ll1 - self.generated_img is an output of the generator
         total_loss += self.L_l1
 
 
@@ -562,7 +366,7 @@ class Painet(BaseModel):
         # return
 
         # Perceptual loss (Content and Style)
-        self.loss_content_gen, self.loss_style_gen = self.VGG_loss(self.generated_img, self.input_P2) #TODO
+        self.loss_content_gen, self.loss_style_gen = self.VGG_loss(self.generated_img, self.input_P2)
         self.loss_style_gen *= self.opt.lambda_style
         self.loss_content_gen *= self.opt.lambda_content
         total_loss += (self.loss_content_gen + self.loss_style_gen)
@@ -582,13 +386,3 @@ class Painet(BaseModel):
         self.optimizer_G.zero_grad()
         self.backward_G()
         self.optimizer_G.step()
-
-
-class CrossEntropyLoss2d(nn.Module):
-    def __init__(self, weight=None, size_average=True, ignore_index=255):
-        super(CrossEntropyLoss2d, self).__init__()
-        self.nll_loss = nn.NLLLoss(weight, size_average, ignore_index)
-        self.softmax = nn.LogSoftmax(dim=1)
-
-    def forward(self, inputs, targets):
-        return self.nll_loss(self.softmax(inputs), targets)
