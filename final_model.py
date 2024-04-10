@@ -11,12 +11,10 @@ import ntpath
 from torch.nn import init
 import warnings
 from torch.optim import lr_scheduler
-from model.networks import external_function
 from VGG19 import VGG19
 import itertools
 import torch
 import torch.nn as nn
-import model.networks as network
 from collections import OrderedDict
 
 
@@ -129,18 +127,18 @@ class Final_Model(nn.Module):
         super(Final_Model, self).__init__()
 
         self.opt = opt
-        self.device = 'mps'
+        self.device = opt.device
 
-        self.generator = Generator().to("mps")
+        self.generator = Generator().to(self.device)
 
         # define the discriminator
         # if self.opt.dataset_mode == 'fashion':
-        self.discriminator = Discriminator(ndf=32, img_f=128, layers=4).to("mps")
+        self.discriminator = Discriminator(ndf=32, img_f=128, layers=4).to(self.device)
 
         # define the loss functions
         self.GAN_loss = loss.Adversarial_Loss().to(self.device)
         self.L1_loss = torch.nn.L1Loss()
-        self.VGG_loss = external_function.VGGLoss().to(opt.device)
+        self.VGG_loss = loss.VGG_Loss().to(opt.device)
         self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
 
         # Optimizer for the generator
@@ -156,6 +154,22 @@ class Final_Model(nn.Module):
             filter(lambda p: p.requires_grad, self.discriminator.parameters()),
             lr=opt.lr * opt.ratio_g2d, betas=(0.9, 0.999)
         )
+
+    def save_networks(self, epoch, iteration):
+        """
+            Save all the networks to the disk.
+        """
+        save_filename = f"{epoch}_{iteration}_generator.pth"
+        save_path = os.path.join(self.opt.save_dir, save_filename)
+
+        torch.save(self.generator.cpu().state_dict(), save_path)
+        self.generator.to(self.device)
+
+        save_filename = f"{epoch}_{iteration}_discriminator.pth"
+        save_path = os.path.join(self.opt.save_dir, save_filename)
+
+        torch.save(self.discriminator.cpu().state_dict(), save_path)
+        self.discriminator.to(self.device)
 
     def save_results(self, save_data, iteration, epoch, result_psnr, lpips_result, fid_result, results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
         """
@@ -180,24 +194,9 @@ class Final_Model(nn.Module):
         """
             Load all the networks from the disk.
         """
-        for name, net in zip([generator_path, discriminator_path], [self.generator, self.discriminator]):
-            filename = name
-            path = os.path.join(filename)
+        self.generator.load_state_dict(torch.load(generator_path, map_location=self.device))
+        self.discriminator.load_state_dict(torch.load(discriminator_path, map_location=self.device))
 
-            if not os.path.isfile(path):
-                warnings.warn(f"Checkpoint not found for network {name} at {path}", RuntimeWarning)
-                continue
-
-            state_dict = torch.load(path, map_location=self.device)
-            model_dict = net.state_dict()
-
-            # Filter out unnecessary keys
-            state_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.size() == model_dict[k].size()}
-            # Update current model state dict
-            model_dict.update(state_dict)
-            net.load_state_dict(model_dict)
-
-            print(f"Loaded {name} from {filename}")
 
     def print_gradients(self, model,epoch , iteration, modelname='generator'):
         data = {}
@@ -260,13 +259,28 @@ class Final_Model(nn.Module):
         result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
         result_psnr = psnr(self.input_P2[:subset, :, :, :], generated_img)
         lpips_result = calc_lpips(self.input_P2[:subset, :, :, :], generated_img, self.opt)
-        print(generated_img.shape)
         fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
         self.save_results(result, iteration, epoch, result_psnr, lpips_result, fid_result, data_name='all')
 
 
         # result = torch.cat([self.input_BP1[:subset, :, :, :], self.input_SPL1[:subset, :, :, :]], dim=3)
         # self.save_results(result, iteration, epoch, data_name='all')
+
+
+    def test_phase(self,  subset=20):
+        generated_img, _, _ = self.generator(
+            self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
+            self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
+            self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :], debug=True
+        )
+        result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
+        result_psnr = psnr(self.input_P2[:subset, :, :, :], generated_img)
+        lpips_result = calc_lpips(self.input_P2[:subset, :, :, :], generated_img, self.opt)
+        fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
+        self.save_results(result, "", "Test", result_psnr, lpips_result, fid_result, data_name='all')
+        return  result_psnr, lpips_result, fid_result
+
+
 
     def set_input(self, input):
         self.input = input
@@ -277,9 +291,9 @@ class Final_Model(nn.Module):
         # Automatically transfer all tensors to the specified device
         for key in keys:
             if key in input:
-                setattr(self, 'input_' + key, input[key].to('mps'))
+                setattr(self, 'input_' + key, input[key].to(self.device))
 
-        self.label_P2 = input['label_P2'].to('mps')
+        self.label_P2 = input['label_P2'].to(self.device)
 
         # Handle image paths separately as they are not tensors
         for i in range(input['P1'].size(0)):  # Assuming 'P1' exists and has a batch dimension

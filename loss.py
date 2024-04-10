@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-# from VGG19 import VGG19
+from VGG19 import VGG19
 import torch.nn.functional as F
 
 class Adversarial_Loss(nn.Module):
@@ -25,7 +25,7 @@ class VGG_Loss(nn.Module):
     https://arxiv.org/abs/1603.08155
     Uses features from a VGG19 network to compute content and style losses between two images.
     """
-    def __init__(self, vgg_model, weights=None):
+    def __init__(self, vgg_model=VGG19(), weights=None):
         super(VGG_Loss, self).__init__()
         if weights is None:
             weights = [1.0, 1.0, 1.0, 1.0, 1.0]
@@ -38,7 +38,7 @@ class VGG_Loss(nn.Module):
     def compute_gram(self, x):
         b, ch, h, w = x.size()
         features = x.view(b, ch, h * w)
-        G = torch.mm(features, features.transpose(1, 2))
+        G = torch.matmul(features, features.transpose(1, 2))
         return G.div_(h * w * ch)
 
     def forward(self, x, y):

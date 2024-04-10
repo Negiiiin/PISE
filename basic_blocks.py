@@ -500,20 +500,20 @@ class Per_Region_Normalization(nn.Module):
     """
     This class implements a feature extraction block that applies normalization
     and conditional style-based modulation to an input feature map based on segmentation
-    maps and style codes.
+    maps and style codes. It uses 1D convolutions for applying transformations based on style codes.
     """
-    def __init__(self, input_channels, style_length=256, kernel_size=3,  norm_layer=nn.BatchNorm2d):
+    def __init__(self, input_channels, style_length=256, kernel_size=3, norm_layer=nn.BatchNorm2d):
         super(Per_Region_Normalization, self).__init__()
-        self.debugger = {}
         self.norm = norm_layer(input_channels)
         self.style_length = style_length
+        # Using Conv2d for gamma and beta generation
         self.conv_gamma = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)//2)
         self.conv_beta = nn.Conv2d(style_length, input_channels, kernel_size=kernel_size, padding=(kernel_size-1)//2)
-        self.fc_mu_layers = nn.ModuleList([nn.Linear(style_length, style_length) for _ in range(8)]) # TODO We can use 1D convolutions instead of linear layers as well!
+        # Using Conv1d for the style transformation layers
+        self.fc_mu_layers = nn.ModuleList([nn.Conv1d(style_length, style_length, kernel_size=1) for _ in range(8)])
 
-    def forward(self, fp, sg, style_codes, mask_codes, debug=False): #style code is per region encoding output(P(sj)
-        """Applies normalization and conditional style modulation to the input features."""
-        sg = F.interpolate(sg, size=fp.size()[2:], mode='nearest') # resize sg to match the input feature map
+    def forward(self, fp, sg, style_codes, mask_codes, debug=False):
+        sg = F.interpolate(sg, size=fp.size()[2:], mode='nearest')
         normalized_features = self.norm(fp)
         b_size, _, h_size, w_size = normalized_features.shape
         middle_avg = torch.zeros((b_size, self.style_length, h_size, w_size), device=normalized_features.device)
@@ -524,31 +524,22 @@ class Per_Region_Normalization(nn.Module):
                 component_mask_area = torch.sum(component_mask)
                 if component_mask_area > 0:
                     style_code_idx = j if mask_codes[i][j] == 1 else sg.shape[1]
-                    middle_mu = F.relu(self.fc_mu_layers[j](style_codes[i][style_code_idx]))
+                    # Adjusting style codes shape for Conv1d
+                    style_code = style_codes[i][style_code_idx].unsqueeze(0).unsqueeze(2)  # Adding batch and length dimension
+                    middle_mu = F.relu(self.fc_mu_layers[j](style_code))
+                    # Removing the added dimensions after Conv1d
+                    middle_mu = middle_mu.squeeze(0)
+                    # Only attempt to squeeze the last dimension if it's of size 1
+                    if middle_mu.size(-1) == 1:
+                        middle_mu = middle_mu.squeeze(-1)
                     component_mu = middle_mu.view(self.style_length, 1).expand(-1, component_mask_area)
                     middle_avg[i].masked_scatter_(component_mask, component_mu)
-                else: # gpt suggested remove the else! wonder why
-                    middle_mu = F.relu(self.fc_mu_layers[j](style_codes[i].mean(0,keepdim=False)))
-                    component_mu = middle_mu.reshape(self.style_length, 1).expand(self.style_length, component_mask_area)
-                    middle_avg[i].masked_scatter_(sg.bool()[i, j], component_mu)
 
         gamma_avg = self.conv_gamma(middle_avg)
         beta_avg = self.conv_beta(middle_avg)
         out = normalized_features * (1 + gamma_avg) + beta_avg
 
-        if debug:
-            self.debugger["Per_Region_Normalization_fp"] = fp
-            self.debugger["Per_Region_Normalization_Segmentation"] = sg
-            self.debugger["Per_Region_Normalization_Style_Codes"] = style_codes
-            self.debugger["Per_Region_Normalization_Mask_Codes"] = mask_codes
-            self.debugger["Per_Region_Normalization_Middle_Avg"] = middle_avg
-            self.debugger["Per_Region_Normalization_Gamma_Avg"] = gamma_avg
-            self.debugger["Per_Region_Normalization_Beta_Avg"] = beta_avg
-            self.debugger["Per_Region_Normalization_Out"] = out
-            self.debugger["Per_Region_Normalization_Out_Shape"] = out.shape
-
         return out
-
 class Res_Block_Encoder(nn.Module):
     """
     Residual Block for Encoder

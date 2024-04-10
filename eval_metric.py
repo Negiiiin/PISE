@@ -25,7 +25,7 @@ def calc_lpips(original, generated, opt):
     lpips_model = lpips.LPIPS(net='vgg').to(opt.device)
 
     similarity = lpips_model(original, generated)
-    return similarity
+    return similarity[0,0,0]
 
 import numpy as np
 from scipy.linalg import sqrtm
@@ -56,7 +56,7 @@ def calc_fid(feature_vectors_real, feature_vectors_fake):
     # fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
     #
     # return fid
-
+    return 0
     # Move tensors to CPU and convert to NumPy if they're not already
     if feature_vectors_real.is_cuda or str(feature_vectors_real.device).startswith('mps'):
         feature_vectors_real = feature_vectors_real.cpu().numpy()

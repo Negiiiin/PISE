@@ -17,12 +17,14 @@ class TrainOptions(BaseOptions):
 
         # display the results
         parser.add_argument('--display_freq', type=int, default=200, help='frequency of showing training results on screen')
-        parser.add_argument('--eval_iters_freq', type=int, default=10, help='frequency of showing training results on screen')
+        parser.add_argument('--generate_img', type=int, default=100, help='frequency of showing training results on screen')
         parser.add_argument('--print_freq', type=int, default=200, help='frequency of showing training results on console')
         parser.add_argument('--save_latest_freq', type=int, default=200, help='frequency of saving the latest results')
+        parser.add_argument('--save_net', type=int, default=200, help='frequency of saving the latest results')
         parser.add_argument('--save_iters_freq', type=int, default=20, help='frequency of saving checkpoints at the end of epochs')
         parser.add_argument('--no_html', action='store_true', help='do not save intermediate training results')
         parser.add_argument('--ratio_g2d', type=float, default=0.1, help='learning rate ratio G to D')
+        parser.add_argument('--save_dir', type=str, default="result", help='frequency of saving the latest results')
 
         self.isTrain = True
 

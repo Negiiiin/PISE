@@ -42,7 +42,7 @@ if __name__ == '__main__':
     opt = TrainOptions().parse()
 
     if torch.cuda.is_available():
-        device = torch.device('cuda:2')
+        device = torch.device('cuda:0')
         use_multi_gpu = True
     elif torch.backends.mps.is_available():
         device = torch.device('mps')
@@ -59,16 +59,25 @@ if __name__ == '__main__':
 
     epoch = 0
 
+
     visualizer = visualizer.Visualizer(opt)
+    opt.device = device
     model = Final_Model(opt)
 
-    # model.load_networks(opt.gen_path, opt.dis_path)
+    if opt.continue_train:
+        model.load_networks(opt.gen_path, opt.dis_path)
+        part_after_slash = opt.gen_path.split("/")[-1]
+
+        # Splitting the isolated part by underscores to extract Num1 and Num2
+        parts = part_after_slash.split("_")
+        # Extracting num1 and num2 assuming they are integers
+        epoch = int(parts[0]) - 1
 
     # Attach hooks to all layers
     # attach_gradient_logging_hooks(model)
 
-    model.clear_or_create_directory("logs")
-    model.clear_or_create_directory("fashion_data/eval_results")
+    # model.clear_or_create_directory("logs")
+    # model.clear_or_create_directory("fashion_data/eval_results")
 
     # training process
     while (epoch < max_epochs):
@@ -82,19 +91,19 @@ if __name__ == '__main__':
             model.set_input(data)
             model.optimize_parameters()
 
-            if i % opt.eval_iters_freq == 0:
+            if i % opt.generate_img == 0:
                 for param in model.generator.parameters():
                     param.requires_grad = False
                 for param in model.discriminator.parameters():
                     param.requires_grad = False
-                print('saving the model of iterations %d at epoch %d' % (i, epoch))
+                print('generating images of iterations %d at epoch %d' % (i, epoch))
                 model.test2(i, epoch)
 
                 eval_results = model.get_loss_results()
                 visualizer.print_current_eval(epoch, i, eval_results)
                 visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
-                # visualizer.tensorboard_weights_and_grads(model.generator, epoch, i, summary_writer, "generator")
-                # visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
+                visualizer.tensorboard_weights_and_grads(model.generator, epoch, i, summary_writer, "generator")
+                visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
                 if opt.display_id > 0:
                     visualizer.plot_current_score(i, eval_results)
 
@@ -102,5 +111,8 @@ if __name__ == '__main__':
                     param.requires_grad = True
                 for param in model.discriminator.parameters():
                     param.requires_grad = True
+
+            if i % opt.save_net == 0:
+                model.save_networks(epoch, i)
 
     print('\nEnd Training')
