@@ -2,11 +2,11 @@ import time
 import data as Dataset
 import torch
 from util import visualizer
-from options.train_options import TrainOptions
+from options.test_options import TestOptions
 
 from final_model import *
 import basic_blocks
-
+from eval_metric import calculate_fid, get_fid_features
 import tensorflow as tf
 
 # Setup TensorBoard writer
@@ -39,7 +39,7 @@ def attach_gradient_logging_hooks(model):
 if __name__ == '__main__':
     max_epochs = 30
 
-    opt = TrainOptions().parse()
+    opt = TestOptions().parse()
 
     if torch.cuda.is_available():
         device = torch.device('cuda:0')
@@ -50,10 +50,27 @@ if __name__ == '__main__':
     else:
         device = torch.device('cpu')
         use_multi_gpu = False
+
+    # opt.isTrain = False
     dataset = Dataset.create_dataloader(opt)
 
     dataset_size = len(dataset) * opt.batchSize
     print('training images = %d' % dataset_size)
+
+
+    # Calculate FID
+    with torch.no_grad():
+
+
+        generated_dir = './fashion_data/test_output'
+        generated_features = get_fid_features(device=device, directory=generated_dir)
+        real_features = get_fid_features(device=device, dataloader=dataset)
+
+        print('Calculating FID score')
+        print(real_features.shape, generated_features.shape)
+        fid_value = calculate_fid(real_features, generated_features)
+        print(f'FID score: {fid_value}')
+
 
     keep_training = False
 
@@ -66,63 +83,21 @@ if __name__ == '__main__':
 
     dataset_size = len(dataset) * opt.batchSize
     print('testing images = %d' % dataset_size)
-    model.eval()
     sum_result_psnr, sum_lpips_result, sum_fid_result = 0, 0, 0
     with torch.no_grad():
         for i, data in enumerate(dataset):
-            print(data.shape[0])
             model.set_input(data)
-            result_psnr, lpips_result, fid_result = model.test_phase()
-            sum_result_psnr += result_psnr * data.shape[0]
-            sum_lpips_result += lpips_result * data.shape[0]
-            sum_fid_result += fid_result * data.shape[0]
+            print(model.input_P1.shape)
+            result_psnr, lpips_result = model.test_phase(i)
+            sum_result_psnr += result_psnr
+            sum_lpips_result += lpips_result
             print('testing %d / %d' % (i, len(dataset)))
 
         print('average psnr: %.4f' % (sum_result_psnr / dataset_size))
         print('average lpips: %.4f' % (sum_lpips_result / dataset_size))
-        print('average fid: %.4f' % (sum_fid_result / dataset_size))
+    #     res
+    # testing 8569 / 8570
+    # average psnr: 10.7624
+    # average lpips: 0.2490
+    # average fid: 0.0000
 
-
-    # Attach hooks to all layers
-    # attach_gradient_logging_hooks(model)
-
-    # model.clear_or_create_directory("logs")
-    # model.clear_or_create_directory("fashion_data/eval_results")
-
-    # training process
-    while (epoch < max_epochs):
-        epoch_start_time = time.time()
-        epoch += 1
-        print('\n Training epoch: %d' % epoch)
-
-
-        for i, data in enumerate(dataset):
-            iter_start_time = time.time()
-            model.set_input(data)
-            model.optimize_parameters()
-
-            if i % opt.generate_img == 0:
-                for param in model.generator.parameters():
-                    param.requires_grad = False
-                for param in model.discriminator.parameters():
-                    param.requires_grad = False
-                print('generating images of iterations %d at epoch %d' % (i, epoch))
-                model.test2(i, epoch)
-
-                eval_results = model.get_loss_results()
-                visualizer.print_current_eval(epoch, i, eval_results)
-                visualizer.tensorboard_log(epoch, i, eval_results, summary_writer)
-                visualizer.tensorboard_weights_and_grads(model.generator, epoch, i, summary_writer, "generator")
-                visualizer.tensorboard_weights_and_grads(model.discriminator, epoch, i, summary_writer, "discriminator")
-                if opt.display_id > 0:
-                    visualizer.plot_current_score(i, eval_results)
-
-                for param in model.generator.parameters():
-                    param.requires_grad = True
-                for param in model.discriminator.parameters():
-                    param.requires_grad = True
-
-            if i % opt.save_net == 0:
-                model.save_networks(epoch, i)
-
-    print('\nEnd Training')

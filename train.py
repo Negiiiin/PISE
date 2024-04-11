@@ -37,7 +37,7 @@ def attach_gradient_logging_hooks(model):
 
 
 if __name__ == '__main__':
-    max_epochs = 30
+    max_epochs = 100
 
     opt = TrainOptions().parse()
 
@@ -62,6 +62,7 @@ if __name__ == '__main__':
 
     visualizer = visualizer.Visualizer(opt)
     opt.device = device
+    opt.isTrain = True
     model = Final_Model(opt)
 
     if opt.continue_train:

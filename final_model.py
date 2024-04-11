@@ -141,6 +141,11 @@ class Final_Model(nn.Module):
         self.VGG_loss = loss.VGG_Loss().to(opt.device)
         self.cross_entropy_2d_loss = loss.Cross_Entropy_Loss2d()
 
+        if opt.isTrain is False:
+            self.eval()
+            self.generator.eval()
+            print("Is in eval mode")
+            return None
         # Optimizer for the generator
         self.optimizer_G = torch.optim.Adam(
             filter(lambda p: p.requires_grad, self.generator.parameters()),
@@ -171,12 +176,12 @@ class Final_Model(nn.Module):
         torch.save(self.discriminator.cpu().state_dict(), save_path)
         self.discriminator.to(self.device)
 
-    def save_results(self, save_data, iteration, epoch, result_psnr, lpips_result, fid_result, results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
+    def save_results(self, save_data, iteration, epoch, results_dir="fashion_data/eval_results", data_name='none', data_ext='jpg'):
         """
             Save the training or testing results to disk.
         """
         # print("----------------", result_psnr)
-        print(f'Whole batch: PSNR: {result_psnr} - LPIPS: {lpips_result[[0,0,0]]} - FID: {fid_result}')
+
         for i, img_path in enumerate(self.image_paths):
             print(f'Processing image: {img_path}')
             # Extract the base name without the directory path and extension
@@ -189,6 +194,7 @@ class Final_Model(nn.Module):
             # Convert the tensor to a numpy image and save
             img_numpy = tensor2im(save_data[i])
             save_image(img_numpy, full_img_path)
+
 
     def load_networks(self, generator_path, discriminator_path):
         """
@@ -259,15 +265,16 @@ class Final_Model(nn.Module):
         result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
         result_psnr = psnr(self.input_P2[:subset, :, :, :], generated_img)
         lpips_result = calc_lpips(self.input_P2[:subset, :, :, :], generated_img, self.opt)
-        fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
-        self.save_results(result, iteration, epoch, result_psnr, lpips_result, fid_result, data_name='all')
+        # fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
+        print(f'Whole batch: PSNR: {result_psnr} - LPIPS: {lpips_result[[0, 0, 0]]}')
+        self.save_results(result, iteration, epoch, data_name='all')
 
 
         # result = torch.cat([self.input_BP1[:subset, :, :, :], self.input_SPL1[:subset, :, :, :]], dim=3)
         # self.save_results(result, iteration, epoch, data_name='all')
 
 
-    def test_phase(self,  subset=20):
+    def test_phase(self,index,  subset=20):
         generated_img, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
@@ -276,9 +283,11 @@ class Final_Model(nn.Module):
         result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
         result_psnr = psnr(self.input_P2[:subset, :, :, :], generated_img)
         lpips_result = calc_lpips(self.input_P2[:subset, :, :, :], generated_img, self.opt)
-        fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
-        self.save_results(result, "", "Test", result_psnr, lpips_result, fid_result, data_name='all')
-        return  result_psnr, lpips_result, fid_result
+        # fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
+        print(f'Whole batch: PSNR: {result_psnr} - LPIPS: {lpips_result[[0, 0, 0]]}')
+        self.save_results(result, "", "Test", data_name='all', results_dir='fashion_data/eval_test_results')
+        self.save_results(generated_img, index, "Test", data_name='ref', results_dir='fashion_data/test_output')
+        return result_psnr, lpips_result
 
 
 

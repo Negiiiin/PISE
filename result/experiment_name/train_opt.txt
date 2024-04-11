@@ -2,10 +2,10 @@
 angle: False
 batchSize: 8
 checkpoints_dir: ./result
-continue_train: False
+continue_train: True
 dataroot: ./dataset/fashion_data/
 dataset_mode: fashion
-dis_path: result/7_0_discriminator.pth
+dis_path: result/29_0_discriminator.pth
 display_env: experimentname
 display_freq: 200
 display_id: 0
@@ -14,7 +14,7 @@ display_single_pane_ncols: 0
 display_winsize: 256
 fid_gt_path: None
 gan_mode: lsgan
-gen_path: result/7_0_generator.pth
+gen_path: result/29_0_generator.pth
 generate_img: 100
 gpu_ids: 0
 image_nc: 3

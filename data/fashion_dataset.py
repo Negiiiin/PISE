@@ -29,7 +29,7 @@ class FashionDataset(BaseDataset):
         phase = opt.phase
         pairLst = os.path.join(root, 'fasion-pairs-%s.csv' %phase)#'fasion-pairs-%s.csv' % phase)
 #        pairLst = os.path.join(root, 'arbf_pres.csv')
-        name_pairs = self.init_categories(pairLst)
+        name_pairs = self.init_categories(pairLst, opt.isTrain)
         
         image_dir = os.path.join(root, '%s' % phase)
         bonesLst = os.path.join(root, 'fasion-annotation-%s.csv' %phase)#'fasion-annotation-%s.csv' % phase)
@@ -37,10 +37,11 @@ class FashionDataset(BaseDataset):
         return image_dir, bonesLst, name_pairs, par_dir
 
 
-    def init_categories(self, pairLst):
+    def init_categories(self, pairLst, isTrain=True):
         pairs_file_train = pd.read_csv(pairLst)
-        size = len(pairs_file_train) # TODO changed
-        size = 20000
+        size = len(pairs_file_train)  # TODO changed
+        if isTrain:
+            size = 20000
         pairs = []
         print('Loading data pairs ...')
         for i in range(size):
