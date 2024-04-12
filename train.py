@@ -67,6 +67,7 @@ if __name__ == '__main__':
 
     if opt.continue_train:
         model.load_networks(opt.gen_path, opt.dis_path)
+        model.to(device)
         part_after_slash = opt.gen_path.split("/")[-1]
 
         # Splitting the isolated part by underscores to extract Num1 and Num2

@@ -3,6 +3,7 @@ import os
 import torch
 import lpips
 import numpy as np
+from mpmath import sqrtm
 from torch.utils.data import DataLoader
 from torchvision import models, transforms, datasets
 from scipy import linalg
@@ -86,17 +87,46 @@ def get_fid_features(batch_size=1, dims=2048, device='mps', dataloader=None, dat
 
     return features
 
-def calculate_fid(real_features, generated_features):
-    mu1, sigma1 = real_features.mean(axis=0), np.cov(real_features, rowvar=False)
-    mu2, sigma2 = generated_features.mean(axis=0), np.cov(generated_features, rowvar=False)
 
-    ssdiff = np.sum((mu1 - mu2) ** 2.0)
-    covmean = linalg.sqrtm(sigma1.dot(sigma2), disp=False)[0]
+def calculate_fid(real_features, gen_features):
+    # Check and convert numpy arrays to PyTorch tensors if necessary
+    if isinstance(real_features, np.ndarray):
+        real_features = torch.from_numpy(real_features).float().cuda()
+    elif not real_features.is_cuda:
+        real_features = real_features.cuda()
 
-    if np.iscomplexobj(covmean):
-        covmean = covmean.real
+    if isinstance(gen_features, np.ndarray):
+        gen_features = torch.from_numpy(gen_features).float().cuda()
+    elif not gen_features.is_cuda:
+        gen_features = gen_features.cuda()
 
-    fid = ssdiff + np.trace(sigma1 + sigma2 - 2.0 * covmean)
-    return fid
+    # Calculate the mean of the features
+    mu1 = torch.mean(real_features, dim=0)
+    mu2 = torch.mean(gen_features, dim=0)
 
+    # Subtract the means to center the data
+    real_centered = real_features - mu1
+    gen_centered = gen_features - mu2
 
+    # Calculate the covariance matrices
+    sigma1 = real_centered.t().mm(real_centered) / (real_features.size(0) - 1)
+    sigma2 = gen_centered.t().mm(gen_centered) / (gen_features.size(0) - 1)
+
+    # Calculate the squared difference in means
+    ssdiff = torch.sum((mu1 - mu2) ** 2)
+
+    # Calculate sqrt of product of covariances using SVD for stability
+    U1, S1, V1 = torch.svd(sigma1)
+    U2, S2, V2 = torch.svd(sigma2)
+    covmean = U1 @ torch.diag(torch.sqrt(S1)) @ U1.t() @ U2 @ torch.diag(torch.sqrt(S2)) @ U2.t()
+
+    # Calculate FID
+    fid = ssdiff + torch.trace(sigma1 + sigma2 - 2 * covmean)
+    return fid.item()  # Return as Python float for convenience
+
+# Example usage:
+# Assuming real_features and gen_features are numpy arrays or PyTorch tensors
+# real_features = np.random.rand(32, 2048).astype(np.float32)  # Simulated feature vectors for 32 images
+# gen_features = np.random.rand(32, 2048).astype(np.float32)  # Simulated feature vectors for 32 images
+# fid_score = calculate_fid_from_features_cuda(real_features, gen_features)
+# print('FID score:', fid_score)

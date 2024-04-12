@@ -274,20 +274,20 @@ class Final_Model(nn.Module):
         # self.save_results(result, iteration, epoch, data_name='all')
 
 
-    def test_phase(self,index,  subset=20):
+    def test_phase(self,index,  subset=32):
         generated_img, _, _ = self.generator(
             self.input_P1[:subset, :, :, :], self.input_P2[:subset, :, :, :],
             self.input_BP1[:subset, :, :, :], self.input_BP2[:subset, :, :, :],
             self.input_SPL1[:subset, :, :, :], self.input_SPL2[:subset, :, :, :], debug=True
         )
-        result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
+        # result = torch.cat([self.input_P1[:subset, :, :, :], generated_img, self.input_P2[:subset, :, :, :]], dim=3)
         result_psnr = psnr(self.input_P2[:subset, :, :, :], generated_img)
         lpips_result = calc_lpips(self.input_P2[:subset, :, :, :], generated_img, self.opt)
         # fid_result = calc_fid(self.input_P2[:subset, :, :, :], generated_img)
         print(f'Whole batch: PSNR: {result_psnr} - LPIPS: {lpips_result[[0, 0, 0]]}')
-        self.save_results(result, "", "Test", data_name='all', results_dir='fashion_data/eval_test_results')
-        self.save_results(generated_img, index, "Test", data_name='ref', results_dir='fashion_data/test_output')
-        return result_psnr, lpips_result
+        # self.save_results(result, "", "Test", data_name='all', results_dir='fashion_data/eval_test_results')
+        # self.save_results(generated_img, index, "Test", data_name='ref', results_dir='fashion_data/test_output')
+        return generated_img, result_psnr, lpips_result
 
 
 
